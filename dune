@@ -1,0 +1,9 @@
+(executable
+ (name tests)
+ (libraries batteries)
+ (preprocess (pps ppx_vers))
+ )
+
+(env
+  (dev
+    (flags (:standard -w -32))))
