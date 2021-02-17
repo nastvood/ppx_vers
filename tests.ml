@@ -1,15 +1,23 @@
-(*[%vers [type user = 
-{
-  name: string
-} ] "fsdfsd"];;*)
-
+(* dune build tests.exe *)
 
 type %vers user = 
 {
   name: string
-};;
+}
 
-type %vers t0 = int;;
+type %vers user = 
+{
+  name: string;
+  age: int
+}
+
+(*type %vers user = 
+{
+  name: string
+}*)
+
+(*type %vers t0 = int
+type %vers t0 = float*)
 
 (*type [%vers "foo"] user = 
 {
