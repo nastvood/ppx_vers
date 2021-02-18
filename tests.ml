@@ -1,5 +1,11 @@
 (* dune build tests.exe *)
 
+
+type fake_user = 
+{
+  name: string
+}
+
 type %vers user = 
 {
   name: string
@@ -9,6 +15,17 @@ type %vers user =
 {
   name: string;
   age: int
+}
+
+type %vers address = 
+{
+  city: string
+}
+
+type %vers address = 
+{
+  city: string;
+  street: string;
 }
 
 (*type %vers user = 
