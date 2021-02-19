@@ -1,7 +1,15 @@
-(executable
- (name tests)
+(executables 
+ (names tests)
+ (modes byte native)
+ (modules tests)
  (libraries batteries)
  (preprocess (pps ppx_vers))
+ )
+
+(executables 
+ (names tests_done)
+ (modes byte)
+ (modules tests_done)
  )
 
 (env

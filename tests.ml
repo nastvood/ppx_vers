@@ -25,12 +25,24 @@ type%vers user =
   surname: string [@vers_set (try BatString.split "" p.Prev.name |> snd with | Not_found -> "")]
 }
 
-type%vers enm = 
+type%vers enmp = 
   [`Firs]
 
-type%vers enm = 
+type%vers enmp = 
   [`Firs
-  | `Second
+  | `Second of int
+  ]
+
+type%vers enmp = 
+  [`Firs
+  | `Second of int
+  | `Third of string
+  ]
+
+type%vers enmp = 
+  [`Firs
+  | `Second of int
+  | `Third of (string * int) [@vers_set ? `Third s when `Third (s, 0) ]
   ]
 
 type%vers tli = int list

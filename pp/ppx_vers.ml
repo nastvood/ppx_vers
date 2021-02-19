@@ -1,4 +1,6 @@
 (* ocamlc -dsource _build/default/tests.ml *)
+(*ignore(Location.raise_errorf ~loc "this is an %s message" "error")*)
+
 open Ppxlib
 
 module AD = Ast_builder.Default
@@ -67,6 +69,15 @@ let vers_set_payload_type_declaration td =
       Some attr.attr_payload
     with Not_found -> None     
 
+let vers_set_payload_row_field rf =
+  if rf.prf_attributes = []
+  then None
+  else
+    try
+      let attr = List.find (fun a -> a.attr_name.txt = vers_set) rf.prf_attributes in
+      Some attr.attr_payload
+    with Not_found -> None   
+
 let expr_by_payload payload =    
   (match payload with
   | PStr s -> 
@@ -76,9 +87,24 @@ let expr_by_payload payload =
     | _ -> assert false)
   | _ -> assert false)
 
-(*ignore(Location.raise_errorf ~loc "this is an %s message" "error")*)
+let pvariant_by_type_declaration td =
+  match td.ptype_manifest with
+  | Some ({ptyp_desc = Ptyp_variant (rfx, cf, lx); _})  -> Some (rfx, cf, lx)
+  | _ -> None
 
-(* ocamlfind ppx_tools/dumpast -e "{ name = p.Prev.name }" *)
+let vers_set_payload_row_fields rsx =
+  List.fold_left (fun acc rs ->
+    match (rs.prf_desc, vers_set_payload_row_field rs) with
+    | (Rtag (loc, _, _), Some pl) ->          
+      let (pat, exp) =
+        match pl with
+        | PPat (pat, Some exp) -> (pat, exp)
+        | _ -> assert false
+      in
+      (loc.txt, (pat, exp)) :: acc
+    | (Rtag (_, _, _), None) -> acc
+    | (Rinherit _, _) -> assert false
+  ) [] rsx   
 
 let get_upgrade_fun ~loc td =
   match td.ptype_kind with
@@ -97,9 +123,33 @@ let get_upgrade_fun ~loc td =
     let eres = AD.pexp_record ~loc lexps None in
     [%stri let upgrade p = [%e eres] ]
   | Ptype_abstract -> 
-    (match vers_set_payload_type_declaration td with
-    | Some payload -> [%stri let upgrade p = [%e (expr_by_payload payload)] ]  
-    | _ -> assert false)
+    (match pvariant_by_type_declaration td with
+    | Some (rfx, _cf, _l) ->
+      (match vers_set_payload_row_fields rfx with
+      | [] -> 
+        [%stri let upgrade p = (p :> [%t (AD.ptyp_constr ~loc {txt = Lident td.ptype_name.txt; loc} [])]) ]
+      | pls ->        
+        let cases =
+          List.map (fun rf ->
+            let (tag_name, exists_constr) = match rf.prf_desc with Rtag (l, _, ctlx) -> (l.txt, ctlx <> []) | Rinherit _ -> assert false in
+            let (lhs, rhs) =
+              match List.assoc tag_name pls with
+              | (pat, exp) -> (pat, exp)
+              | exception Not_found ->                  
+                (AD.ppat_variant ~loc tag_name (if exists_constr then Some(AD.ppat_var ~loc {txt = "x"; loc}) else None),
+                AD.pexp_variant ~loc tag_name (if exists_constr then Some(AD.pexp_ident ~loc {txt = Lident "x"; loc}) else None))
+            in  
+            AD.case lhs None rhs
+          ) rfx
+        in
+        let m = AD.pexp_match ~loc [%expr p] cases in
+        [%stri let upgrade p = [%e m] ]
+      )        
+    | None ->
+      (match vers_set_payload_type_declaration td with
+      | Some payload -> [%stri let upgrade p = [%e (expr_by_payload payload)] ]  
+      | None ->  assert false)
+    )      
   | _ -> assert false
 
 let expand_ver ~ctxt vers = 
