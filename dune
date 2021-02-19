@@ -6,11 +6,11 @@
  (preprocess (pps ppx_vers))
  )
 
-(executables 
- (names tests_done)
- (modes byte)
- (modules tests_done)
- )
+;;(executables 
+;; (names tests_done)
+;; (modes byte)
+;; (modules tests_done)
+;; )
 
 (env
   (dev

@@ -1,6 +1,5 @@
 (* dune build tests.exe *)
 
-
 type fake_user = 
 {
   name: string
@@ -25,38 +24,43 @@ type%vers user =
   surname: string [@vers_set (try BatString.split "" p.Prev.name |> snd with | Not_found -> "")]
 }
 
-type%vers enmp = 
-  [`Firs]
+type%vers tli = int list
+
+type%vers tli = float list [@@vers_set (List.map float p)]
 
 type%vers enmp = 
-  [`Firs
+  [ `First ]
+
+type%vers enmp = 
+  [ `First
   | `Second of int
   ]
 
 type%vers enmp = 
-  [`Firs
+  [ `First
   | `Second of int
   | `Third of string
   ]
 
 type%vers enmp = 
-  [`Firs
+  [ `First
   | `Second of int
   | `Third of (string * int) [@vers_set ? `Third s when `Third (s, 0) ]
   ]
 
-type%vers tli = int list
+type%vers enm = 
+  | First
 
-type%vers tli = float list [@@vers_set (List.map float p)]
+type%vers enm = 
+  | First
+  | Second of int
 
+type%vers enm = 
+  | First
+  | Second of int
+  | Third of string
 
-type %vers address = 
-{
-  city: string
-}
-
-type %vers address = 
-{
-  city: string;
-  street: string [@vers_set ""];
-}
+type%vers enm = 
+  | First
+  | Second of int
+  | Third of (string * string) [@vers_set ? Prev.Third p when Third (p, p) ]

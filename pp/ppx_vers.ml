@@ -1,5 +1,6 @@
 (* ocamlc -dsource _build/default/tests.ml *)
 (*ignore(Location.raise_errorf ~loc "this is an %s message" "error")*)
+(*Printf.printf "%s\n\n" (Pprintast.string_of_structure [s]);*)
 
 open Ppxlib
 
@@ -10,30 +11,35 @@ type str_descr =
     type_name: string;
     cnt: int ref;
     last_loc: location;
+    prev_td: type_declaration
   }
 
 let h_strs: (string, str_descr) Hashtbl.t   = Hashtbl.create 0
 
-let init_str ~loc type_name =
+let init_str ~loc type_name prev_td =
   try    
     let _ = Hashtbl.find h_strs type_name in
     assert false
-  with | Not_found -> { type_name; cnt = ref 0; last_loc = loc } 
+  with | Not_found -> { type_name; cnt = ref 0; last_loc = loc; prev_td } 
 
-let get_vers_num_by_name ~loc type_name =
+let init_vers_num ~loc type_name last_td =
   try    
     let descr = Hashtbl.find h_strs type_name in
     !(descr.cnt)
   with | Not_found -> 
-    Hashtbl.add h_strs type_name (init_str ~loc type_name);
+    Hashtbl.add h_strs type_name (init_str ~loc type_name last_td);
     0
+
+let get_vers_num_by_name type_name =
+  let descr = Hashtbl.find h_strs type_name in
+  !(descr.cnt)
 
 let exists_name = Hashtbl.mem h_strs
 
-let incr_vers_by_name ~loc type_name =
+let incr_vers_by_name ~loc type_name prev_td =
   try    
     let descr = Hashtbl.find h_strs type_name in
-    let descr = {(descr) with last_loc = loc} in
+    let descr = {(descr) with last_loc = loc; prev_td} in
     Hashtbl.replace h_strs type_name descr;
     incr descr.cnt 
   with | Not_found -> assert false      
@@ -49,34 +55,14 @@ let data_by_mod_name mod_name =
 
 let vers_set = "vers_set"  
 
-(* [@vers_set] *)
-let vers_set_payload_label_declaration ld =
-  if ld.pld_attributes = []
+let vers_set_payload attrs =
+  if attrs = []
   then None
   else
     try
-      let attr = List.find (fun a -> a.attr_name.txt = vers_set) ld.pld_attributes in
-      Some attr.attr_payload     
-    with Not_found -> None  
-
-(* [@@vers_set] *)
-let vers_set_payload_type_declaration td =
-  if td.ptype_attributes = []
-  then None
-  else
-    try
-      let attr = List.find (fun a -> a.attr_name.txt = vers_set) td.ptype_attributes in
+      let attr = List.find (fun a -> a.attr_name.txt = vers_set) attrs in
       Some attr.attr_payload
-    with Not_found -> None     
-
-let vers_set_payload_row_field rf =
-  if rf.prf_attributes = []
-  then None
-  else
-    try
-      let attr = List.find (fun a -> a.attr_name.txt = vers_set) rf.prf_attributes in
-      Some attr.attr_payload
-    with Not_found -> None   
+    with Not_found -> None 
 
 let expr_by_payload payload =    
   (match payload with
@@ -94,7 +80,7 @@ let pvariant_by_type_declaration td =
 
 let vers_set_payload_row_fields rsx =
   List.fold_left (fun acc rs ->
-    match (rs.prf_desc, vers_set_payload_row_field rs) with
+    match (rs.prf_desc, vers_set_payload rs.prf_attributes) with
     | (Rtag (loc, _, _), Some pl) ->          
       let (pat, exp) =
         match pl with
@@ -106,14 +92,27 @@ let vers_set_payload_row_fields rsx =
     | (Rinherit _, _) -> assert false
   ) [] rsx   
 
-let get_upgrade_fun ~loc td =
+let vers_set_payload_by_constructor_declaration cdx =
+  List.fold_left (fun acc cd ->
+    match vers_set_payload cd.pcd_attributes with
+    | Some pl -> 
+      let (pat, exp) =
+        match pl with
+        | PPat (pat, Some exp) -> (pat, exp)
+        | _ -> assert false
+      in
+      (cd.pcd_name.txt, (pat, exp)) :: acc
+    | _ -> acc
+  ) [] cdx
+
+let get_upgrade_fun ~loc type_name td =
   match td.ptype_kind with
   | Ptype_record lds ->
     let lexps =
       List.map (fun ld ->
         let lid = {txt = Lident ld.pld_name.txt; loc} in
         let efield = 
-          match vers_set_payload_label_declaration ld with
+          match vers_set_payload ld.pld_attributes with
           | Some payload -> expr_by_payload payload
           | _ -> AD.pexp_field ~loc [%expr p] {txt = Ldot (Lident "Prev", ld.pld_name.txt); loc}
         in  
@@ -146,16 +145,39 @@ let get_upgrade_fun ~loc td =
         [%stri let upgrade p = [%e m] ]
       )        
     | None ->
-      (match vers_set_payload_type_declaration td with
+      (match vers_set_payload td.ptype_attributes with
       | Some payload -> [%stri let upgrade p = [%e (expr_by_payload payload)] ]  
       | None ->  assert false)
     )      
-  | _ -> assert false
+  | Ptype_variant cdx -> 
+    let pls = vers_set_payload_by_constructor_declaration cdx in
+    let parsed_cdx = 
+      if pls = [] 
+      then match (Hashtbl.find h_strs type_name).prev_td.ptype_kind with Ptype_variant cdx -> cdx | _ -> assert false
+      else cdx 
+    in
+    let cases =
+      List.map (fun cd ->
+        let tag_name = cd.pcd_name.txt in
+        let exists_constr = match cd.pcd_args with Pcstr_tuple ctx -> ctx <> [] | Pcstr_record lbdx -> lbdx <> [] in
+        let (lhs, rhs) =
+          (match List.assoc tag_name pls with
+          | (pat, exp) -> (pat, exp)
+          | exception Not_found ->
+            (AD.ppat_construct ~loc {txt = Ldot (Lident "Prev", tag_name); loc} (if exists_constr then Some(AD.ppat_var ~loc {txt = "x"; loc}) else None),
+            AD.pexp_construct ~loc {txt = Lident tag_name; loc} (if exists_constr then Some(AD.pexp_ident ~loc {txt = Lident "x"; loc}) else None))
+          )
+        in  
+        AD.case lhs None rhs
+      ) parsed_cdx
+    in     
+    let m = AD.pexp_match ~loc [%expr p] cases in
+    [%stri let upgrade p = [%e m] ]
+  | Ptype_open -> assert false
 
-let expand_ver ~ctxt vers = 
-  (*let () = print_endline _vers in*)
+let expand_ver ~ctxt payload = 
   let loc = Expansion_context.Extension.extension_point_loc ctxt in
-  match vers with (* Ppxlib_ast__.Import.Parsetree.payload*)
+  match payload with
   PStr s ->
     let first_struct = List.hd s in 
     let first_struct =
@@ -163,7 +185,7 @@ let expand_ver ~ctxt vers =
       | Pstr_type (_, td) when List.length td = 1 ->  
         let hd_td = List.hd td in
         let type_name = hd_td.ptype_name.txt in
-        let cnt = get_vers_num_by_name ~loc type_name in
+        let cnt = init_vers_num ~loc type_name hd_td in
         let mod_name = mod_name_by_cnt type_name cnt in
         let sts = [first_struct] in
         let sts =
@@ -172,13 +194,13 @@ let expand_ver ~ctxt vers =
             let prev_mod_name = mod_name_by_cnt type_name (cnt - 1) in
             let lm = AD.pmod_ident ~loc {txt = Lident prev_mod_name; loc} in
             let mod_prev = [%stri module Prev = [%m lm] ]  in
-            let upgrade_fun = get_upgrade_fun ~loc hd_td in
+            let upgrade_fun = get_upgrade_fun ~loc type_name hd_td in
             upgrade_fun :: mod_prev :: sts |> List.rev
           else sts             
         in
         let m = AD.pmod_structure ~loc sts in
         let mb =  AD.module_binding ~loc ~name:{txt = Some mod_name; loc} ~expr:m in
-        let () = incr_vers_by_name ~loc type_name in
+        let () = incr_vers_by_name ~loc type_name hd_td in
         AD.pstr_module ~loc mb
       | _ -> assert false
     in
@@ -194,8 +216,6 @@ let vers_extension =
 
 let rule_vers = Ppxlib.Context_free.Rule.extension vers_extension
 
-(*Printf.printf "%s\n\n" (Pprintast.string_of_structure [s]);*)
-
 let type_kind_by_mod_expr pe =
   match pe.pmod_desc with
   | Pmod_structure s -> 
@@ -203,7 +223,6 @@ let type_kind_by_mod_expr pe =
     (match si.pstr_desc with
     | Pstr_type (_, td) -> 
       (List.hd td).ptype_kind
-      (*Printf.printf "%s\n\n" (Pprintast.string_of_structure s)*)
     | _ -> assert false)
   | _ -> assert false
 
@@ -214,15 +233,15 @@ let impl s =
     | Pstr_module {pmb_name = {txt = Some(mod_name); _}; pmb_expr = pe; _} ->      
       (match data_by_mod_name mod_name with
       | Some (ver, type_name) when exists_name type_name ->
-        let cur_ver = get_vers_num_by_name ~loc type_name - 1 in
+        let cur_ver = get_vers_num_by_name type_name - 1 in
         if cur_ver = ver
         then 
-          let ct = AD.ptyp_constr ~loc {txt = Lident (mod_name ^ "." ^ type_name); loc} [] in
+          let ct = AD.ptyp_constr ~loc {txt = Ldot (Lident mod_name, type_name); loc} [] in
           let td = AD.type_declaration ~loc ~name:{txt = type_name; loc}
             ~params:[] ~cstrs:[] ~kind:(type_kind_by_mod_expr pe) ~private_:Public ~manifest:(Some ct)
           in
           let pt = Ast_builder.Default.pstr_type ~loc Recursive [td] in
-          s (*:: pt*) :: strs
+          s :: pt :: strs
         else s :: strs
       | _ -> s :: strs)
     | _ -> s :: strs

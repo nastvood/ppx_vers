@@ -1,0 +1,7 @@
+*.cmi
+*.cmo
+*.swp
+*.out
+
+_build
+dune-project
