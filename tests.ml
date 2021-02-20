@@ -26,7 +26,7 @@ type%vers user =
   surname: string [@migrate (try BatString.split "" p.Prev.name |> snd with | Not_found -> "")]
 } [@@deriving bin_io]
 
-type%vers address =
+(*type%vers address =
 {
   city: string;
   street: string;
@@ -39,7 +39,7 @@ type%vers address =
   street: string;
   number: int;
   resides: user option [@migrate None]
-} [@@deriving bin_io]
+} [@@deriving bin_io]*)
 
 (*type%vers tli = int list
 

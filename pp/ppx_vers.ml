@@ -245,15 +245,46 @@ let gen_last_write_fun ~loc type_name ver =
     [%e e_f_name] buf ~pos v
   ] 
 
-let gen_last_read_fun ~loc type_name ver =    
+let gen_last_read_fun ~loc type_name cur_ver =    
   let f_name = "bin_read_" ^ type_name in
   let f_name_l = AD.pvar ~loc f_name in
-  let ever = AD.eint ~loc ver in
+  let ever = AD.eint ~loc cur_ver in
   let e_f_name = AD.pexp_ident ~loc {txt = Lident f_name; loc} in
+  let fail_case = 
+    let e_file = AD.estring ~loc loc.loc_start.Stdlib.Lexing.pos_fname in
+    let e_type = AD.estring ~loc type_name in
+    AD.case [%pat? v] None [%expr failwith (Printf.sprintf "Unknown VERS %s.%s:%d" [%e e_file] [%e e_type] v)] 
+  in
+  let rec loop cases ver ex =
+    if ver < 0
+    then cases 
+    else
+      let p = AD.pint ~loc ver in
+      let e_res =
+        let ex = List.rev ex in
+        let e_first =
+          let txt = if ver = cur_ver then Lident (List.hd ex) else Ldot (Lident (mod_name_by_cnt type_name ver), List.hd ex) in
+          let e_f_name = AD.pexp_ident ~loc {txt; loc} in
+          [%expr [%e e_f_name]  buf ~pos_ref]  
+        in
+        let rec eloop cnt ex e =
+          match ex with
+          | [] -> e
+          | h :: tl -> 
+            let txt = if tl = [] then Lident "upgrade" else Ldot (Lident (mod_name_by_cnt type_name (cnt + 1)), h) in
+            let e_upg = AD.pexp_ident ~loc {txt; loc} in 
+            let e = [%expr [%e e_upg] [%e e]] in
+            eloop (cnt - 1) tl e
+        in
+        eloop ver (List.tl ex) e_first
+      in  
+      let case = AD.case [%pat? [%p p]] None e_res in
+      loop (case :: cases) (ver - 1) ("upgrade" :: ex)
+  in
+  let cases = fail_case :: loop [] cur_ver [f_name] |> List.rev in
+  let m = AD.pexp_match ~loc [%expr Bin_prot.Read.bin_read_int_8bit buf ~pos_ref] cases in
   [%stri let [%p f_name_l] = fun buf -> fun ~pos_ref ->
-    assert false
-    (*let pos = Bin_prot.Write.bin_write_int_8bit buf ~pos [%e ever] in  
-    [%e e_f_name] buf ~pos v*)
+    [%e m] 
   ] 
 
 let patch_module_expr ~loc type_name ver pe =
