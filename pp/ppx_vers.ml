@@ -1,6 +1,7 @@
 (* ocamlc -dsource _build/default/tests.ml *)
-(*ignore(Location.raise_errorf ~loc "this is an %s message" "error")*)
+(*ignore(Location.raise_errorf ~loc "this is an %s messapge" "error")*)
 (*Printf.printf "%s\n\n" (Pprintast.string_of_structure [s]);*)
+(*ocamlfind ppx_tools/dumpast -e '(match p with `First x -> `First x)'*)
 
 open Ppxlib
 
@@ -53,7 +54,7 @@ let data_by_mod_name mod_name =
     Some (ver, name)  
   with | _ -> None    
 
-let vers_set = "vers_set"  
+let vers_set = "migrate"  
 
 let vers_set_payload attrs =
   if attrs = []
@@ -193,9 +194,11 @@ let expand_ver ~ctxt payload =
           then 
             let prev_mod_name = mod_name_by_cnt type_name (cnt - 1) in
             let lm = AD.pmod_ident ~loc {txt = Lident prev_mod_name; loc} in
-            let mod_prev = [%stri module Prev = [%m lm] ]  in
-            let upgrade_fun = get_upgrade_fun ~loc type_name hd_td in
-            upgrade_fun :: mod_prev :: sts |> List.rev
+            (*gen_bin_read ~loc type_name hd_td ::
+            gen__bin_read ~loc type_name hd_td ::*)
+            get_upgrade_fun ~loc type_name hd_td ::
+            [%stri module Prev = [%m lm] ] :: 
+            sts |> List.rev
           else sts             
         in
         let m = AD.pmod_structure ~loc sts in
@@ -226,6 +229,14 @@ let type_kind_by_mod_expr pe =
     | _ -> assert false)
   | _ -> assert false
 
+let gen_bin_funcs ~loc type_name mod_name =  
+  List.map (fun s ->
+    let f_name = "bin_" ^ s  ^  "_" ^ type_name in
+    let f_name_l = AD.pvar ~loc f_name in
+    let e_r = AD.pexp_ident ~loc {txt = Ldot (Lident mod_name, f_name); loc} in
+    [%stri let [%p f_name_l] = [%e e_r]]
+  ) ["shape"; "reader"; "size"; "write"; "read"]
+
 let impl s =
   List.fold_right (fun s strs ->
     let loc = s.pstr_loc in
@@ -241,7 +252,9 @@ let impl s =
             ~params:[] ~cstrs:[] ~kind:(type_kind_by_mod_expr pe) ~private_:Public ~manifest:(Some ct)
           in
           let pt = Ast_builder.Default.pstr_type ~loc Recursive [td] in
-          s :: pt :: strs
+          s :: 
+          pt :: 
+          (List.append (gen_bin_funcs ~loc type_name mod_name) strs)
         else s :: strs
       | _ -> s :: strs)
     | _ -> s :: strs

@@ -2,8 +2,8 @@
  (names tests)
  (modes byte native)
  (modules tests)
- (libraries batteries)
- (preprocess (pps ppx_vers))
+ (libraries batteries bin_prot)
+ (preprocess (pps ppx_bin_prot ppx_vers))
  )
 
 ;;(executables 
@@ -14,4 +14,4 @@
 
 (env
   (dev
-    (flags (:standard -w -32 -w -49 -w -6))))
+    (flags (:standard -w -32 -w -49 -w -6 -w -33))))
