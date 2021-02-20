@@ -33,3 +33,5 @@ type enmp1 =
   | Second of int
   | Third of (string * int) [@vers_set  ? `Third s when `Third (s, 0) ]
 
+let f x = x + 1  
+

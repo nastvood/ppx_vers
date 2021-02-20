@@ -194,8 +194,6 @@ let expand_ver ~ctxt payload =
           then 
             let prev_mod_name = mod_name_by_cnt type_name (cnt - 1) in
             let lm = AD.pmod_ident ~loc {txt = Lident prev_mod_name; loc} in
-            (*gen_bin_read ~loc type_name hd_td ::
-            gen__bin_read ~loc type_name hd_td ::*)
             get_upgrade_fun ~loc type_name hd_td ::
             [%stri module Prev = [%m lm] ] :: 
             sts |> List.rev
@@ -237,16 +235,73 @@ let gen_bin_funcs ~loc type_name mod_name =
     [%stri let [%p f_name_l] = [%e e_r]]
   ) ["shape"; "reader"; "size"; "write"; "read"]
 
+let gen_last_write_fun ~loc type_name ver =  
+  let f_name = "bin_write_" ^ type_name in
+  let f_name_l = AD.pvar ~loc f_name in
+  let ever = AD.eint ~loc ver in
+  let e_f_name = AD.pexp_ident ~loc {txt = Lident f_name; loc} in
+  [%stri let [%p f_name_l] = fun buf -> fun ~pos -> fun v ->
+    let pos = Bin_prot.Write.bin_write_int_8bit buf ~pos [%e ever] in  
+    [%e e_f_name] buf ~pos v
+  ] 
+
+let gen_last_read_fun ~loc type_name ver =    
+  let f_name = "bin_read_" ^ type_name in
+  let f_name_l = AD.pvar ~loc f_name in
+  let ever = AD.eint ~loc ver in
+  let e_f_name = AD.pexp_ident ~loc {txt = Lident f_name; loc} in
+  [%stri let [%p f_name_l] = fun buf -> fun ~pos_ref ->
+    assert false
+    (*let pos = Bin_prot.Write.bin_write_int_8bit buf ~pos [%e ever] in  
+    [%e e_f_name] buf ~pos v*)
+  ] 
+
+let patch_module_expr ~loc type_name ver pe =
+  match pe.pmod_desc with
+  | Pmod_structure sx -> 
+    let sx =
+      List.fold_right (fun s sx ->
+        match s.pstr_desc with
+        | Pstr_include i -> 
+          let pm = i.pincl_mod in
+          (match pm.pmod_desc with
+          | Pmod_structure isx -> 
+            let isx =
+              List.fold_right (fun s isx ->
+                (match s.pstr_desc with
+                | Pstr_value (_, vbx) when vbx <> [] ->
+                  let hd_vbx = List.hd vbx in
+                  (match hd_vbx.pvb_pat.ppat_desc with
+                  | Ppat_var l when l.txt = "bin_writer_" ^ type_name -> 
+                    gen_last_write_fun ~loc type_name ver :: s :: isx
+                  | Ppat_var l when l.txt = "bin_reader_" ^ type_name -> 
+                    gen_last_read_fun ~loc type_name ver :: s :: isx
+                  | _ -> s :: isx)
+                | _ -> s :: isx)
+              ) isx []
+            in
+            let pm = {(pm) with pmod_desc = Pmod_structure isx} in
+            let i = {(i) with pincl_mod = pm} in
+            {(s) with pstr_desc = Pstr_include i} :: sx
+          | _ -> s :: sx)
+        | _ -> s :: sx
+      ) sx []
+    in
+    {(pe) with pmod_desc = Pmod_structure sx}
+  | _ -> pe  
+
 let impl s =
   List.fold_right (fun s strs ->
     let loc = s.pstr_loc in
     match s.pstr_desc with
-    | Pstr_module {pmb_name = {txt = Some(mod_name); _}; pmb_expr = pe; _} ->      
+    | Pstr_module ({pmb_name = {txt = Some(mod_name); _}; pmb_expr = pe; _} as pm) ->      
       (match data_by_mod_name mod_name with
       | Some (ver, type_name) when exists_name type_name ->
         let cur_ver = get_vers_num_by_name type_name - 1 in
         if cur_ver = ver
         then 
+          let pe = patch_module_expr ~loc type_name ver pe in
+          let s = {(s) with pstr_desc = Pstr_module {(pm) with pmb_expr = pe}} in
           let ct = AD.ptyp_constr ~loc {txt = Ldot (Lident mod_name, type_name); loc} [] in
           let td = AD.type_declaration ~loc ~name:{txt = type_name; loc}
             ~params:[] ~cstrs:[] ~kind:(type_kind_by_mod_expr pe) ~private_:Public ~manifest:(Some ct)
