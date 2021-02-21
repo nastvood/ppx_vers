@@ -2,22 +2,23 @@
 
 open Bin_prot.Std
 
-type%vers user = 
+(*type enmp1i25 = 
+  | E1
+  | E2 of int
+  | E3 of (string * int)*)
+
+type%vers[@num 3] user = 
 {
   name: string;
   lx : int list;
   opt : string option;
-} [@@deriving bin_io]
-
-type%vers user = 
+} and user =
 {
   name: string;
   lx : int list;
   opt : string option;
   age: int [@migrate 0]
-} [@@deriving bin_io]
-
-type%vers user = 
+}  and user = 
 {
   name: string;
   lx : int list;
@@ -25,6 +26,24 @@ type%vers user =
   age: int;  
   surname: string [@migrate (try BatString.split "" p.Prev.name |> snd with | Not_found -> "")]
 } [@@deriving bin_io]
+
+ 
+(*type%vers[@num 1] address =
+{
+  city: string;
+  street: string;
+  number: int;
+} [@@deriving bin_io]*)
+
+
+(*[%%vers 1 
+type address =
+{
+  city: string;
+  street: string;
+  number: int;
+} [@@deriving bin_io]
+]*)
 
 (*type%vers address =
 {

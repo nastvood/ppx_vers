@@ -7,11 +7,15 @@ open Ppxlib
 
 module AD = Ast_builder.Default
 
+let vers_set = "migrate"  
+let vers = "vers"
+let vers_num = "num"
+
 type str_descr = 
   {
     type_name: string;
+    first_ver: int;
     cnt: int ref;
-    last_loc: location;
     prev_td: type_declaration
   }
 
@@ -21,7 +25,20 @@ let init_str ~loc type_name prev_td =
   try    
     let _ = Hashtbl.find h_strs type_name in
     assert false
-  with | Not_found -> { type_name; cnt = ref 0; last_loc = loc; prev_td } 
+  with | Not_found -> 
+    let cnt =
+      try
+        let attr = List.find (fun a -> a.attr_name.txt = vers_num) prev_td.ptype_attributes in   
+        (match attr.attr_payload with
+        | PStr s -> 
+          (match (List.hd s).pstr_desc with
+          | Pstr_eval ({pexp_desc = Pexp_constant (Pconst_integer (s, None)); _}, _) -> int_of_string s            
+          | _ -> assert false)  
+        | _ -> assert false)  
+      with Not_found -> 0    
+    in  
+    let () = Printf.printf "-------------------- %d" cnt in
+    { type_name; cnt = ref cnt; first_ver = cnt; prev_td } 
 
 let init_vers_num ~loc type_name last_td =
   try    
@@ -37,10 +54,10 @@ let get_vers_num_by_name type_name =
 
 let exists_name = Hashtbl.mem h_strs
 
-let incr_vers_by_name ~loc type_name prev_td =
+let incr_vers_by_name type_name prev_td =
   try    
     let descr = Hashtbl.find h_strs type_name in
-    let descr = {(descr) with last_loc = loc; prev_td} in
+    let descr = {(descr) with prev_td} in
     Hashtbl.replace h_strs type_name descr;
     incr descr.cnt 
   with | Not_found -> assert false      
@@ -54,7 +71,6 @@ let data_by_mod_name mod_name =
     Some (ver, name)  
   with | _ -> None    
 
-let vers_set = "migrate"  
 
 let vers_set_payload attrs =
   if attrs = []
@@ -201,7 +217,7 @@ let expand_ver ~ctxt payload =
         in
         let m = AD.pmod_structure ~loc sts in
         let mb =  AD.module_binding ~loc ~name:{txt = Some mod_name; loc} ~expr:m in
-        let () = incr_vers_by_name ~loc type_name hd_td in
+        let () = incr_vers_by_name type_name hd_td in
         AD.pstr_module ~loc mb
       | Pstr_type _ -> failwith "Only one typedef in type definition"  
       | _ -> assert false
@@ -339,7 +355,61 @@ let patch_module_expr ~loc type_name ver pe =
     {(pe) with pmod_desc = Pmod_structure sx}
   | _ -> pe  
 
-let impl s =
+let mkattr_vers_num ~loc num =
+  let const = AD.pexp_constant ~loc (Pconst_integer (num, None)) in
+  let payload = PStr [AD.pstr_eval ~loc const []] in
+  AD.attribute ~loc ~name:{txt = vers_num; loc } ~payload
+
+(*let () = Printf.printf "%s\n" (Pprintast.string_of_structure [s]) in*)
+let preprocess_impl sx =
+  List.fold_right (fun s strs ->
+    match s.pstr_desc with
+    | Pstr_extension ((e, payload), ax) when e.txt = vers ->
+      let loc = s.pstr_loc in
+      let () = Printf.printf "vers found\n" in
+      (match payload with
+      | PStr [fs; sf] -> assert false
+        (*(match fs.pstr_desc with
+        | Pstr_eval ({pexp_desc = Pexp_constant (Pconst_integer (vn, _)); _}, _) ->
+          (match sf.pstr_desc with
+          | Pstr_type (rf, td) ->
+            let htd = List.hd td in
+            let attr = mkattr_vers_num ~loc vn in
+            let td = {(htd) with ptype_attributes = attr :: htd.ptype_attributes} :: List.tl td in
+            let () = Printf.printf "%s %s\n" (e.txt) vn in
+            let () = Printf.printf "%s\n" (Pprintast.string_of_structure [fs]) in
+            let sf = {(sf) with pstr_desc = Pstr_type (rf, td)} in
+            let payload = PStr [sf] in
+            let s = {(s) with pstr_desc = Pstr_extension ((e, payload), ax)} in
+            s :: strs
+          | _ -> s :: strs)
+        | _ -> s :: strs)*)
+      | PStr [sf] ->  
+        (match sf.pstr_desc with
+        | Pstr_type (rf, td) when td <> [] ->
+          let () = Printf.printf "%s\n" (Pprintast.string_of_structure [sf]) in         
+          let last_i = List.length td - 1 in
+          let last_attrs = (List.nth td last_i).ptype_attributes in
+          let pex =
+            List.mapi (fun i t ->
+              let t = {(t) with ptype_attributes = 
+                  if i = last_i then t.ptype_attributes else List.append t.ptype_attributes last_attrs 
+                } 
+              in
+              let pstr_desc = Pstr_type (rf, [t]) in
+              let payload = PStr [{(sf) with pstr_desc}] in
+              let pstr_desc = Pstr_extension ((e, payload), ax) in
+              {(s) with pstr_desc} 
+            ) td
+          in
+          let () = Printf.printf "%s %d\n" (Pprintast.string_of_structure pex) (List.length ax) in         
+          List.append pex strs
+        | _ -> assert false)  
+      | _ -> s :: strs)
+    | _ -> s :: strs
+  ) sx []
+
+let impl sx =
   List.fold_right (fun s strs ->
     let loc = s.pstr_loc in
     match s.pstr_desc with
@@ -363,10 +433,11 @@ let impl s =
         else s :: strs
       | _ -> s :: strs)
     | _ -> s :: strs
-  ) s []
+  ) sx []
 
 let () =
   Driver.register_transformation
     ~rules:[rule_vers]
+    ~preprocess_impl
     ~impl
-    "vers"
+    vers

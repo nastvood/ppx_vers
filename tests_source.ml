@@ -32,4 +32,20 @@ type enmp1 =
   | First
   | Second of int
   | Third of (string * int) [@vers_set  ? `Third s when `Third (s, 0) ]
+  [@@vers_num 1]
+
+;;1  
+
+(*type user = 
+{
+  name: string;
+  lx : int list;
+  opt : string option;
+} and 
+user =
+{
+  name: string;
+  lx : int list;
+  opt : string option;
+} *)
 
