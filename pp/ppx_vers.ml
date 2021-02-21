@@ -30,8 +30,8 @@ let init_str ~loc type_name prev_td =
       try
         let attr = List.find (fun a -> a.attr_name.txt = vers_num) prev_td.ptype_attributes in   
         (match attr.attr_payload with
-        | PStr s -> 
-          (match (List.hd s).pstr_desc with
+        | PStr [s] -> 
+          (match s.pstr_desc with
           | Pstr_eval ({pexp_desc = Pexp_constant (Pconst_integer (s, None)); _}, _) -> int_of_string s            
           | _ -> assert false)  
         | _ -> assert false)  
@@ -43,14 +43,15 @@ let init_str ~loc type_name prev_td =
 let init_vers_num ~loc type_name last_td =
   try    
     let descr = Hashtbl.find h_strs type_name in
-    !(descr.cnt)
+    (!(descr.cnt), descr.first_ver)
   with | Not_found -> 
-    Hashtbl.add h_strs type_name (init_str ~loc type_name last_td);
-    0
+    let descr = init_str ~loc type_name last_td in 
+    Hashtbl.add h_strs type_name descr;
+    (!(descr.cnt), descr.first_ver)
 
 let get_vers_num_by_name type_name =
   let descr = Hashtbl.find h_strs type_name in
-  !(descr.cnt)
+  (!(descr.cnt), descr.first_ver)
 
 let exists_name = Hashtbl.mem h_strs
 
@@ -202,11 +203,11 @@ let expand_ver ~ctxt payload =
       | Pstr_type (_, td) when List.length td = 1 ->  
         let hd_td = List.hd td in
         let type_name = hd_td.ptype_name.txt in
-        let cnt = init_vers_num ~loc type_name hd_td in
+        let (cnt, first_ver) = init_vers_num ~loc type_name hd_td in
         let mod_name = mod_name_by_cnt type_name cnt in
         let sts = [first_struct] in
         let sts =
-          if cnt > 0
+          if cnt > first_ver
           then 
             let prev_mod_name = mod_name_by_cnt type_name (cnt - 1) in
             let lm = AD.pmod_ident ~loc {txt = Lident prev_mod_name; loc} in
@@ -262,7 +263,7 @@ let gen_last_write_fun ~loc type_name ver =
     [%e e_f_name] buf ~pos v
   ] 
 
-let gen_last_read_fun ~loc type_name cur_ver =    
+let gen_last_read_fun ~loc type_name cur_ver first_ver =    
   let f_name = "bin_read_" ^ type_name in
   let f_name_l = AD.pvar ~loc f_name in
   let ever = AD.eint ~loc cur_ver in
@@ -273,7 +274,7 @@ let gen_last_read_fun ~loc type_name cur_ver =
     AD.case [%pat? v] None [%expr failwith (Printf.sprintf "Unknown VERS %s.%s:%d" [%e e_file] [%e e_type] v)] 
   in
   let rec loop cases ver ex =
-    if ver < 0
+    if ver < first_ver
     then cases 
     else
       let p = AD.pint ~loc ver in
@@ -321,7 +322,7 @@ let include_to_end pe =
     | None -> pe)
   | _ -> pe
 
-let patch_module_expr ~loc type_name ver pe =
+let patch_module_expr ~loc type_name ver first_ver pe =
   match pe.pmod_desc with
   | Pmod_structure sx -> 
     let sx =
@@ -340,7 +341,7 @@ let patch_module_expr ~loc type_name ver pe =
                   | Ppat_var l when l.txt = "bin_writer_" ^ type_name -> 
                     gen_last_write_fun ~loc type_name ver :: s :: isx
                   | Ppat_var l when l.txt = "bin_reader_" ^ type_name -> 
-                    gen_last_read_fun ~loc type_name ver :: s :: isx
+                    gen_last_read_fun ~loc type_name ver first_ver :: s :: isx
                   | _ -> s :: isx)
                 | _ -> s :: isx)
               ) isx []
@@ -368,22 +369,6 @@ let preprocess_impl sx =
       let loc = s.pstr_loc in
       let () = Printf.printf "vers found\n" in
       (match payload with
-      | PStr [fs; sf] -> assert false
-        (*(match fs.pstr_desc with
-        | Pstr_eval ({pexp_desc = Pexp_constant (Pconst_integer (vn, _)); _}, _) ->
-          (match sf.pstr_desc with
-          | Pstr_type (rf, td) ->
-            let htd = List.hd td in
-            let attr = mkattr_vers_num ~loc vn in
-            let td = {(htd) with ptype_attributes = attr :: htd.ptype_attributes} :: List.tl td in
-            let () = Printf.printf "%s %s\n" (e.txt) vn in
-            let () = Printf.printf "%s\n" (Pprintast.string_of_structure [fs]) in
-            let sf = {(sf) with pstr_desc = Pstr_type (rf, td)} in
-            let payload = PStr [sf] in
-            let s = {(s) with pstr_desc = Pstr_extension ((e, payload), ax)} in
-            s :: strs
-          | _ -> s :: strs)
-        | _ -> s :: strs)*)
       | PStr [sf] ->  
         (match sf.pstr_desc with
         | Pstr_type (rf, td) when td <> [] ->
@@ -416,11 +401,12 @@ let impl sx =
     | Pstr_module ({pmb_name = {txt = Some(mod_name); _}; pmb_expr = pe; _} as pm) ->      
       (match data_by_mod_name mod_name with
       | Some (ver, type_name) when exists_name type_name ->
-        let cur_ver = get_vers_num_by_name type_name - 1 in
+        let (cur_ver, first_ver) = get_vers_num_by_name type_name in
+        let cur_ver = cur_ver - 1 in
         if cur_ver = ver
         then 
           let pe = include_to_end pe in
-          let pe = patch_module_expr ~loc type_name ver pe in
+          let pe = patch_module_expr ~loc type_name ver first_ver pe in
           let s = {(s) with pstr_desc = Pstr_module {(pm) with pmb_expr = pe}} in
           let ct = AD.ptyp_constr ~loc {txt = Longident.parse (mod_name ^ "." ^ type_name); loc} [] in
           let td = AD.type_declaration ~loc ~name:{txt = type_name; loc}

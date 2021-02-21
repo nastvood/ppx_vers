@@ -28,37 +28,13 @@ type%vers[@num 3] user =
 } [@@deriving bin_io]
 
  
-(*type%vers[@num 1] address =
-{
-  city: string;
-  street: string;
-  number: int;
-} [@@deriving bin_io]*)
-
-
-(*[%%vers 1 
-type address =
-{
-  city: string;
-  street: string;
-  number: int;
-} [@@deriving bin_io]
-]*)
-
-(*type%vers address =
+type%vers address =
 {
   city: string;
   street: string;
   number: int;
 } [@@deriving bin_io]
 
-type%vers address =   
-{
-  city: string;
-  street: string;
-  number: int;
-  resides: user option [@migrate None]
-} [@@deriving bin_io]*)
 
 (*type%vers tli = int list
 
