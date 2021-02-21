@@ -111,11 +111,11 @@ let get_upgrade_fun ~loc type_name td =
   | Ptype_record lds ->
     let lexps =
       List.map (fun ld ->
-        let lid = {txt = Lident ld.pld_name.txt; loc} in
+        let lid = {txt = Longident.parse ld.pld_name.txt; loc} in
         let efield = 
           match vers_set_payload ld.pld_attributes with
           | Some payload -> expr_by_payload payload
-          | _ -> AD.pexp_field ~loc [%expr p] {txt = Ldot (Lident "Prev", ld.pld_name.txt); loc}
+          | _ -> AD.pexp_field ~loc [%expr p] {txt = Longident.parse ("Prev." ^ ld.pld_name.txt); loc}
         in  
         (lid, efield)
       ) lds
@@ -165,7 +165,7 @@ let get_upgrade_fun ~loc type_name td =
           (match List.assoc tag_name pls with
           | (pat, exp) -> (pat, exp)
           | exception Not_found ->
-            (AD.ppat_construct ~loc {txt = Ldot (Lident "Prev", tag_name); loc} (if exists_constr then Some(AD.ppat_var ~loc {txt = "x"; loc}) else None),
+            (AD.ppat_construct ~loc {txt = Longident.parse ("Prev." ^ tag_name); loc} (if exists_constr then Some(AD.ppat_var ~loc {txt = "x"; loc}) else None),
             AD.pexp_construct ~loc {txt = Lident tag_name; loc} (if exists_constr then Some(AD.pexp_ident ~loc {txt = Lident "x"; loc}) else None))
           )
         in  
@@ -203,6 +203,7 @@ let expand_ver ~ctxt payload =
         let mb =  AD.module_binding ~loc ~name:{txt = Some mod_name; loc} ~expr:m in
         let () = incr_vers_by_name ~loc type_name hd_td in
         AD.pstr_module ~loc mb
+      | Pstr_type _ -> failwith "Only one typedef in type definition"  
       | _ -> assert false
     in
     first_struct
@@ -231,7 +232,7 @@ let gen_bin_funcs ~loc type_name mod_name =
   List.map (fun s ->
     let f_name = "bin_" ^ s  ^  "_" ^ type_name in
     let f_name_l = AD.pvar ~loc f_name in
-    let e_r = AD.pexp_ident ~loc {txt = Ldot (Lident mod_name, f_name); loc} in
+    let e_r = AD.pexp_ident ~loc {txt = Longident.parse (mod_name ^ "." ^ f_name); loc} in
     [%stri let [%p f_name_l] = [%e e_r]]
   ) ["shape"; "reader"; "size"; "write"; "read"]
 
@@ -287,6 +288,23 @@ let gen_last_read_fun ~loc type_name cur_ver =
     [%e m] 
   ] 
 
+let include_to_end pe =
+  match pe.pmod_desc with
+  | Pmod_structure sx -> 
+    let (opt_inc, sx) = 
+      List.fold_right (fun s (opt_inc, sx) ->
+        match s.pstr_desc  with
+        | Pstr_include _ -> (Some s, sx)
+        | _ -> (opt_inc, s :: sx)
+      ) sx (None, [])
+    in 
+    (match opt_inc with
+    | Some inc ->
+      let sx = List.append sx [inc] in
+      {(pe) with pmod_desc = Pmod_structure sx }
+    | None -> pe)
+  | _ -> pe
+
 let patch_module_expr ~loc type_name ver pe =
   match pe.pmod_desc with
   | Pmod_structure sx -> 
@@ -331,9 +349,10 @@ let impl s =
         let cur_ver = get_vers_num_by_name type_name - 1 in
         if cur_ver = ver
         then 
+          let pe = include_to_end pe in
           let pe = patch_module_expr ~loc type_name ver pe in
           let s = {(s) with pstr_desc = Pstr_module {(pm) with pmb_expr = pe}} in
-          let ct = AD.ptyp_constr ~loc {txt = Ldot (Lident mod_name, type_name); loc} [] in
+          let ct = AD.ptyp_constr ~loc {txt = Longident.parse (mod_name ^ "." ^ type_name); loc} [] in
           let td = AD.type_declaration ~loc ~name:{txt = type_name; loc}
             ~params:[] ~cstrs:[] ~kind:(type_kind_by_mod_expr pe) ~private_:Public ~manifest:(Some ct)
           in
