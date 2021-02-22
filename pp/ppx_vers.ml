@@ -11,6 +11,8 @@ let vers_set = "migrate"
 let vers = "vers"
 let vers_num = "num"
 let vers_ptag = "ptag"
+let variant_int_size = 4
+let bin_io = "bin_io"
 
 type str_descr = 
   {
@@ -322,6 +324,84 @@ let include_to_end pe =
     | None -> pe)
   | _ -> pe
 
+let patch_ptag_bin_size ~loc type_kind s =
+  match s.pstr_desc with
+  | Pstr_value (Nonrecursive, [vb]) ->
+    let se = vb.pvb_expr in
+    (match se.pexp_desc with
+    | Pexp_function pf_cx ->  
+      let pf_cx = 
+        List.mapi (fun i c ->
+          let new_const = AD.pexp_constant ~loc (Pconst_integer (string_of_int variant_int_size, None)) in 
+          match c.pc_rhs.pexp_desc with
+          | Pexp_constant (Pconst_integer ("1", None)) -> 
+            let c = {(c) with pc_rhs = new_const} in
+            c
+          | Pexp_let (Nonrecursive, vbx, pl_e) ->  
+            let (hd_vb, tl_vb) = (List.hd vbx, List.tl vbx) in
+            let hd_vb = {(hd_vb) with pvb_expr = new_const} in
+            let c = {(c) with pc_rhs = {(c.pc_rhs) with pexp_desc = Pexp_let (Nonrecursive, hd_vb :: tl_vb, pl_e)}} in
+            c
+          | _ -> assert false   
+        ) pf_cx
+      in  
+      let se = {(se) with pexp_desc = Pexp_function pf_cx} in
+      let vb = {(vb) with pvb_expr = se} in
+      {(s) with pstr_desc = Pstr_value (Nonrecursive, [vb])}
+    | _ -> assert false)
+  | Pstr_value _ -> assert false      
+  | _ -> s      
+
+let patch_ptag_bin_write ~loc type_kind s =
+  (* Bin_prot.Write.bin_write_variant_int *)  
+  match s.pstr_desc with
+  | Pstr_value (Nonrecursive, [vb]) ->
+    let se = vb.pvb_expr in
+    (match se.pexp_desc with
+    | Pexp_fun (Nolabel, None, pf_p0, pf_e0) ->  
+      (match pf_p0.ppat_desc with
+      | Ppat_var l when l.txt = "buf" ->
+        (match pf_e0.pexp_desc with
+        | Pexp_fun (pf_l1, None, pf_p1, pf_e1) -> 
+          (match pf_e1.pexp_desc with
+          | Pexp_function pf_cx ->
+            let cdx = match type_kind with | Ptype_variant cdx -> cdx | _ -> assert false in 
+            let cdx_hv = List.map (fun cd -> Ocaml_common.Btype.hash_variant cd.pcd_name.txt) cdx in
+            let cdx_len = List.length cdx in
+            (*let () = Printf.printf "%s\n\n" (Pprintast.string_of_expression se) in*)
+            let pf_cx = 
+              List.mapi (fun i c ->
+                (*let () = Printf.printf "%s\n" (Pprintast.string_of_expression c.pc_rhs) in*)
+                let new_s = string_of_int (List.nth cdx_hv i) in
+                let new_const = AD.pexp_constant ~loc (Pconst_integer (new_s, None)) in 
+                let pexp_desc = [%expr Bin_prot.Write.bin_write_variant_int buf ~pos [%e new_const]] in
+                match c.pc_rhs.pexp_desc with
+                | Pexp_apply _ -> 
+                  let c = {(c) with pc_rhs = pexp_desc} in
+                  (*let () = Printf.printf "---%s\n" (Pprintast.string_of_expression c.pc_rhs) in*)
+                  c
+                | Pexp_let (Nonrecursive, vbx, pl_e) ->  
+                  let (hd_vb, tl_vb) = (List.hd vbx, List.tl vbx) in
+                  let hd_vb = {(hd_vb) with pvb_expr = pexp_desc} in
+                  let c = {(c) with pc_rhs = {(c.pc_rhs) with pexp_desc = Pexp_let (Nonrecursive, hd_vb :: tl_vb, pl_e)}} in
+                  (*let () = Printf.printf "---%s\n" (Pprintast.string_of_expression c.pc_rhs) in*)
+                  c
+                | _ -> assert false               
+              ) pf_cx
+            in  
+            let pf_e1 = {(pf_e1) with pexp_desc = Pexp_function pf_cx} in
+            let pf_e0 = {(pf_e0) with pexp_desc = Pexp_fun (pf_l1, None, pf_p1, pf_e1)} in
+            let se = {(se) with pexp_desc = Pexp_fun (Nolabel, None, pf_p0, pf_e0)} in
+            (*let () = Printf.printf "%s\n" (Pprintast.string_of_expression se) in*)
+            let vb = {(vb) with pvb_expr = se} in
+            {(s) with pstr_desc = Pstr_value (Nonrecursive, [vb])}
+          | _ -> assert false)
+        | _ -> assert false)            
+      | _ -> assert false)          
+    | _ -> assert false)
+  | Pstr_value _ -> assert false      
+  | _ -> s      
+
 let patch_ptag_bin_read ~loc type_kind s =
   match s.pstr_desc with
   | Pstr_value (Nonrecursive, [vb]) ->
@@ -341,11 +421,11 @@ let patch_ptag_bin_read ~loc type_kind s =
               List.mapi (fun i c ->
                 if i < cdx_len
                 then  
-                  (match c.pc_lhs.ppat_desc with
+                  match c.pc_lhs.ppat_desc with
                   | Ppat_constant (Pconst_integer (s, co)) -> 
                     let new_s = string_of_int (List.nth cdx_hv i) in
                     {(c) with pc_lhs = {(c.pc_lhs) with ppat_desc = Ppat_constant (Pconst_integer (new_s, co))}}
-                  | _ -> c)                 
+                  | _ -> assert false                 
                 else c                  
               ) pm_cx
             in
@@ -367,7 +447,46 @@ let is_type_variant type_kind =
   | Ptype_variant _ -> true
   | _ -> false  
 
-let patch_module_expr ~loc type_name ver first_ver type_kind pe =
+let patch_module_expr ~loc type_name type_kind pe =
+  match pe.pmod_desc with
+  | Pmod_structure sx -> 
+    let sx =
+      List.fold_right (fun s sx ->
+        match s.pstr_desc with
+        | Pstr_include i -> 
+          let pm = i.pincl_mod in
+          (match pm.pmod_desc with
+          | Pmod_structure isx -> 
+            let isx =
+              List.fold_right (fun s isx ->
+                (match s.pstr_desc with
+                | Pstr_value (_, vbx) when vbx <> [] ->
+                  let hd_vbx = List.hd vbx in
+                  (match hd_vbx.pvb_pat.ppat_desc with
+                  | Ppat_constraint (p, _) ->
+                    (match p.ppat_desc with
+                    | Ppat_var l when l.txt = "bin_read_" ^ type_name && is_type_variant type_kind ->
+                      patch_ptag_bin_read ~loc type_kind s :: (*s ::*) isx  
+                    | Ppat_var l when l.txt = "bin_write_" ^ type_name && is_type_variant type_kind ->
+                      patch_ptag_bin_write ~loc type_kind s :: (*s ::*) isx  
+                    | Ppat_var l when l.txt = "bin_size_" ^ type_name && is_type_variant type_kind ->
+                      patch_ptag_bin_size ~loc type_kind s :: s :: isx  
+                    | _ -> s :: isx)  
+                  | _ -> s :: isx)
+                | _ -> s :: isx)
+              ) isx []
+            in
+            let pm = {(pm) with pmod_desc = Pmod_structure isx} in
+            let i = {(i) with pincl_mod = pm} in
+            {(s) with pstr_desc = Pstr_include i} :: sx
+          | _ -> s :: sx)
+        | _ -> s :: sx
+      ) sx []
+    in
+    {(pe) with pmod_desc = Pmod_structure sx}
+  | _ -> pe  
+
+let patch_module_expr_last ~loc type_name ver first_ver type_kind pe =
   match pe.pmod_desc with
   | Pmod_structure sx -> 
     let sx =
@@ -391,6 +510,10 @@ let patch_module_expr ~loc type_name ver first_ver type_kind pe =
                     (match p.ppat_desc with
                     | Ppat_var l when l.txt = "bin_read_" ^ type_name && is_type_variant type_kind ->
                       patch_ptag_bin_read ~loc type_kind s :: (*s ::*) isx  
+                    | Ppat_var l when l.txt = "bin_write_" ^ type_name && is_type_variant type_kind ->
+                      patch_ptag_bin_write ~loc type_kind s :: (*s ::*) isx  
+                    | Ppat_var l when l.txt = "bin_size_" ^ type_name && is_type_variant type_kind ->
+                      patch_ptag_bin_size ~loc type_kind s :: s :: isx  
                     | _ -> s :: isx)  
                   | _ -> s :: isx)
                 | _ -> s :: isx)
@@ -450,23 +573,24 @@ let impl sx =
     | Pstr_module ({pmb_name = {txt = Some(mod_name); _}; pmb_expr = pe; _} as pm) ->      
       (match data_by_mod_name mod_name with
       | Some (ver, type_name) when exists_name type_name ->
+        let pe = include_to_end pe in
+        let kind = type_kind_by_mod_expr pe in
         let (cur_ver, first_ver) = get_vers_num_by_name type_name in
         let cur_ver = cur_ver - 1 in
         if cur_ver = ver
         then 
-          let pe = include_to_end pe in
-          let kind = type_kind_by_mod_expr pe in
-          let pe = patch_module_expr ~loc type_name ver first_ver kind pe in
+          let pe = patch_module_expr_last ~loc type_name ver first_ver kind pe in
           let s = {(s) with pstr_desc = Pstr_module {(pm) with pmb_expr = pe}} in
           let ct = AD.ptyp_constr ~loc {txt = Longident.parse (mod_name ^ "." ^ type_name); loc} [] in
           let td = AD.type_declaration ~loc ~name:{txt = type_name; loc}
             ~params:[] ~cstrs:[] ~kind ~private_:Public ~manifest:(Some ct)
           in
-          let pt = Ast_builder.Default.pstr_type ~loc Recursive [td] in
           s :: 
-          pt :: 
+          Ast_builder.Default.pstr_type ~loc Recursive [td] :: 
           (List.append (gen_bin_funcs ~loc type_name mod_name) strs)
-        else s :: strs
+        else 
+          let pe = patch_module_expr ~loc type_name kind pe in
+          {(s) with pstr_desc = Pstr_module {(pm) with pmb_expr = pe}} :: strs
       | _ -> s :: strs)
     | _ -> s :: strs
   ) sx []
