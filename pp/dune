@@ -1,7 +1,7 @@
 (library
   (name ppx_vers)
   (kind ppx_rewriter)
-  (libraries ppxlib ppx_tools)
+  (libraries ppxlib ppx_tools batteries)
   (preprocess (pps ppxlib.metaquot))
 )
 

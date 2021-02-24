@@ -11,16 +11,18 @@ let vers_set = "migrate"
 let vers = "vers"
 let vers_num = "num"
 let vers_ptag = "ptag"
+let vers_novers = "novers"
 let variant_int_size = 4
-
+let bin_io = "bin_io"
 let allowed_inner_attrs = [
-  ("deriving", "bin_io"); 
+  ("deriving", bin_io); 
   ("deriving", "sexp"); 
   ("deriving", "sexp_of");
   ("deriving", "of_sexp");
-  ("ptag",""); 
-  ("num", "");
-  ("migrate", "")
+  (vers_ptag,""); 
+  (vers_num, "");
+  (vers_novers, "");
+  (vers_set, "")
 ] 
 
 module SD = struct (* str_descr*)
@@ -80,18 +82,23 @@ module SD = struct (* str_descr*)
 
   let add_attr a type_name =
     let a_name = a.attr_name.txt in
-    let descr_attr a attrs = 
+    let append new_desc a attrs = 
+      if List.mem_assoc new_desc attrs
+      then attrs      
+      else (new_desc, a) :: attrs
+    in
+    let add_descr_attr a attrs = 
       match a.attr_payload with
       | PStr s ->
         if s = []
-        then ((a_name, ""), a) :: attrs
+        then append (a_name, "") a attrs
         else 
           let hd_s = List.hd s in
           (match hd_s.pstr_desc with
           | Pstr_eval (e, p) -> 
             (match e.pexp_desc with
             | Pexp_ident i ->
-              ((a_name, Longident.name i.txt), a) :: attrs
+              append (a_name, Longident.name i.txt) a attrs
             | Pexp_tuple ex when a_name = "deriving" ->
               List.fold_right (fun e attrs ->
                 (match e.pexp_desc with
@@ -100,25 +107,44 @@ module SD = struct (* str_descr*)
                   let hd_s = {(hd_s) with pstr_desc = Pstr_eval (e, p)} in
                   let s = hd_s :: List.tl s in
                   let a = {(a) with attr_payload = PStr s} in
-                  ((a_name, Longident.name i.txt), a) :: attrs
+                  append (a_name, Longident.name i.txt) a attrs
                 | _ -> assert false)
               ) ex attrs
-            | _ -> ((a_name, ""), a) :: attrs)  
-          | _ -> ((a_name, ""), a) :: attrs)  
-      | _ -> ((a_name, ""), a) :: attrs
+            | _ -> append (a_name, "") a attrs)
+          | _ -> append (a_name, "") a attrs)
+      | _ -> append (a_name, "") a attrs
     in    
    (*let () = Printf.printf "%s %s %s \n" type_name a.attr_name.txt descr in*)
-    let add attrs = descr_attr a attrs in
     try
       let attrs = Hashtbl.find h_attrs type_name in
-      Hashtbl.replace h_attrs type_name (add attrs)
+      Hashtbl.replace h_attrs type_name (add_descr_attr a attrs)
     with Not_found -> 
-      Hashtbl.add h_attrs type_name (add [])
+      Hashtbl.add h_attrs type_name (add_descr_attr a [])
 
   let add_attrs attrs type_name =
     List.iter (fun a ->
       add_attr a type_name
     ) attrs   
+
+  let group_deriving attrs =
+    let rec loop attrs lx dx dlx =
+      match attrs with
+      | [] -> 
+        if dx = []
+        then lx
+        else
+          let loc = (List.hd dlx).attr_loc in
+          let ex = List.map (fun d -> AD.pexp_ident ~loc {txt = Longident.parse d; loc}) dx in 
+          let ex = AD.pexp_tuple ~loc ex  in
+          let s = AD.pstr_eval ~loc ex [] in
+          let d_a = AD.attribute ~loc ~name: {txt = "deriving"; loc} ~payload:(PStr [s]) in
+          d_a :: lx 
+      | ((name, descr), a) :: tl -> 
+        if name = "deriving"
+        then loop tl lx (descr :: dx) (a :: dlx)
+        else loop tl (a :: lx) dx dlx
+    in
+    loop attrs [] [] [] 
 
   let exists_attr name descr type_name =
     try
@@ -128,20 +154,28 @@ module SD = struct (* str_descr*)
       ) attrs
     with Not_found -> false
 
+  let get_all_attrs type_name =
+    try 
+      List.fold_right (fun (descr, a) attrs -> 
+        (descr, a) :: attrs
+      ) (Hashtbl.find h_attrs type_name) [] |> group_deriving
+    with Not_found -> []      
+
   let get_attrs ~is_inner type_name =
-    List.fold_right (fun (descr, a) attrs -> 
-      if is_inner 
-      then 
-        (if List.mem descr allowed_inner_attrs 
+    try 
+      List.fold_right (fun (descr, a) attrs -> 
+        if is_inner 
         then 
-          let () = Printf.printf "%s %s %s\n" (fst descr) (snd descr) type_name in
-          a :: attrs
-        else attrs)
-      else 
-        (if not (List.mem descr allowed_inner_attrs)          
-        then a :: attrs
-        else attrs)
-    ) (Hashtbl.find h_attrs type_name) []
+          (if List.mem descr allowed_inner_attrs 
+          then 
+            (descr, a) :: attrs
+          else attrs)
+        else 
+          (if not (List.mem descr allowed_inner_attrs)          
+          then (descr, a) :: attrs
+          else attrs)
+      ) (Hashtbl.find h_attrs type_name) [] |> group_deriving
+    with Not_found -> []      
 
 end
 
@@ -277,7 +311,7 @@ let get_upgrade_fun ~loc type_name td =
 let expand_ver ~ctxt payload = 
   let loc = Expansion_context.Extension.extension_point_loc ctxt in
   match payload with
-  PStr s ->
+  | PStr s ->
     let first_struct = List.hd s in 
     let first_struct =
       match first_struct.pstr_desc with
@@ -305,6 +339,7 @@ let expand_ver ~ctxt payload =
       | _ -> assert false
     in
     first_struct
+    (*List.hd s *)
   | _ -> [%stri let () = ()]
 
 let vers_extension =
@@ -371,6 +406,12 @@ let gen_last_write_fun ~loc type_name ver =
     let pos = Bin_prot.Write.bin_write_int_8bit buf ~pos [%e ever] in  
     [%e e_f_name] buf ~pos v
   ] 
+
+let gen_last_size_fun ~loc type_name =  
+  let f_name = "bin_size_" ^ type_name in
+  let f_name_l = AD.pvar ~loc f_name in
+  let e_f_name = AD.pexp_ident ~loc {txt = Lident f_name; loc} in
+  [%stri let [%p f_name_l] = fun t -> [%e e_f_name] t + 1 ] 
 
 let gen_last_read_fun ~loc type_name cur_ver first_ver =    
   let f_name = "bin_read_" ^ type_name in
@@ -555,17 +596,14 @@ let is_type_variant type_kind =
   | _ -> false 
 
 let patch_ptag ~loc p type_name type_kind s isx =   
-  if SD.exists_attr "ptag" "" type_name 
-  then       
-    (match p.ppat_desc with
-    | Ppat_var l when l.txt = "bin_read_" ^ type_name && is_type_variant type_kind ->
-      patch_ptag_bin_read ~loc type_kind s :: (*s ::*) isx  
-    | Ppat_var l when l.txt = "bin_write_" ^ type_name && is_type_variant type_kind ->
-      patch_ptag_bin_write ~loc type_kind s :: (*s ::*) isx  
-    | Ppat_var l when l.txt = "bin_size_" ^ type_name && is_type_variant type_kind ->
-      patch_ptag_bin_size ~loc type_kind s :: s :: isx  
-    | _ -> s :: isx)  
-  else s :: isx            
+  (match p.ppat_desc with
+  | Ppat_var l when l.txt = "bin_read_" ^ type_name && is_type_variant type_kind ->
+    patch_ptag_bin_read ~loc type_kind s :: (*s ::*) isx  
+  | Ppat_var l when l.txt = "bin_write_" ^ type_name && is_type_variant type_kind ->
+    patch_ptag_bin_write ~loc type_kind s :: (*s ::*) isx  
+  | Ppat_var l when l.txt = "bin_size_" ^ type_name && is_type_variant type_kind ->
+    patch_ptag_bin_size ~loc type_kind s :: s :: isx  
+  | _ -> s :: isx)  
 
 let patch_bin_io_incl ~loc incl type_name type_kind pm isx s =  
   let isx =
@@ -594,7 +632,14 @@ let patch_bin_io_incl_last ~loc ver first_ver incl type_name type_kind pm isx s 
           gen_last_write_fun ~loc type_name ver :: s :: isx
         | Ppat_var l when l.txt = "bin_reader_" ^ type_name -> 
           gen_last_read_fun ~loc type_name ver first_ver :: s :: isx
-        | Ppat_constraint (p, _) -> patch_ptag ~loc p type_name type_kind s isx
+        | Ppat_constraint (p, _) -> 
+          if SD.exists_attr "ptag" "" type_name 
+          then  patch_ptag ~loc p type_name type_kind s isx
+          else
+            (match p.ppat_desc with
+            | Ppat_var l when l.txt = "bin_size_" ^ type_name ->
+              s :: gen_last_size_fun ~loc type_name  :: isx              
+            | _ -> s :: isx)
         | _ -> s :: isx)
       | _ -> s :: isx)
     ) isx []
@@ -642,7 +687,52 @@ let mkattr_vers_num ~loc num =
   let payload = PStr [AD.pstr_eval ~loc const []] in
   AD.attribute ~loc ~name:{txt = vers_num; loc } ~payload
 
-(*let () = Printf.printf "%s\n" (Pprintast.string_of_structure [s]) in*)
+let mkattr_bin_io ~loc =
+  let id = AD.pexp_ident ~loc {txt = Longident.parse bin_io; loc} in
+  let payload = PStr [AD.pstr_eval ~loc id []] in
+  AD.attribute ~loc ~name:{txt = "deriving"; loc } ~payload
+
+let gen_novers_first_type ~loc type_name td =
+  match td.ptype_kind with
+  | Ptype_variant _cdx ->
+    let ct = AD.ptyp_constr ~loc {txt = Longident.parse (type_name ^ "_" ^ vers_novers); loc} [] in
+    AD.type_declaration ~loc ~name:{txt = type_name; loc} ~params:[] ~cstrs:[] ~kind:Ptype_abstract ~private_:Public 
+      ~manifest:(Some ct)     
+  | _ -> assert false
+
+let gen_novers_second_type ~loc type_name td =
+  match td.ptype_kind with
+  | Ptype_variant cdx ->
+    let cdx =
+      List.map (fun cd ->
+        let (p, e) =
+          let exists_constr = match cd.pcd_args with Pcstr_tuple ctx -> ctx <> [] | Pcstr_record lbdx -> lbdx <> [] in
+          if exists_constr
+          then
+            let p = AD.ppat_construct ~loc {txt = Longident.parse cd.pcd_name.txt; loc} (Some (AD.ppat_var ~loc {txt = "x"; loc})) in
+            let pct = AD.ptyp_constr ~loc {txt = Longident.parse ("Prev." ^ type_name); loc} [] in
+            (AD.ppat_constraint ~loc p pct,
+            AD.pexp_construct ~loc {txt = Lident cd.pcd_name.txt; loc} (Some (AD.pexp_ident ~loc {txt = Lident "x"; loc})))
+          else   
+            let p = AD.ppat_construct ~loc {txt = Longident.parse cd.pcd_name.txt; loc} None in
+            let pct = AD.ptyp_constr ~loc {txt = Longident.parse ("Prev." ^ type_name); loc} [] in
+            (AD.ppat_constraint ~loc p pct,
+            AD.pexp_construct ~loc {txt = Lident cd.pcd_name.txt; loc} None)
+        in
+        let attr = AD.attribute ~loc ~name:{txt = vers_set; loc} ~payload:(PPat (p, Some e)) in
+        {(cd) with pcd_attributes = attr :: cd.pcd_attributes}          
+      ) cdx
+    in 
+    {(td) with ptype_kind = Ptype_variant cdx}
+  | _ -> assert false
+
+let gen_novers ~loc type_name rf td attrs =     
+  let td_novers = {(td) with ptype_name = {txt = type_name ^ "_" ^ vers_novers; loc}; ptype_attributes = attrs} in
+  let novers_type = AD.pstr_type ~loc rf [td_novers] in
+  let first_type = gen_novers_first_type ~loc type_name td in
+  let second_type = gen_novers_second_type ~loc type_name td in
+  ([novers_type], [first_type;  second_type])
+
 let preprocess_impl sx =
   List.fold_right (fun s strs ->
     match s.pstr_desc with
@@ -656,23 +746,22 @@ let preprocess_impl sx =
           let type_name = hd_td.ptype_name.txt in
           (*let () = Printf.printf "%s\n" (Pprintast.string_of_structure [sf]) in*)
           let last_i = List.length td - 1 in
-          let all_attrs = List.append hd_td.ptype_attributes  (List.nth td last_i).ptype_attributes  in
+          let all_attrs = List.append hd_td.ptype_attributes (List.nth td last_i).ptype_attributes  in
           let () = SD.add_attrs all_attrs type_name in
+          let ins_attrs = SD.get_all_attrs type_name in
+          let is_novers = List.exists (fun a -> a.attr_name.txt = vers_novers) hd_td.ptype_attributes in
+          let (novers_type, first_type) = if is_novers then gen_novers ~loc type_name rf hd_td ins_attrs else ([], [] ) in
           let pex =
             List.mapi (fun i t ->
-              let t = {(t) with ptype_attributes = 
-                  (*SD.get_attrs ~is_inner:true type_name*)
-                  all_attrs
-                } 
-              in
+              let t = {(t) with ptype_attributes = ins_attrs} in
               let pstr_desc = Pstr_type (rf, [t]) in
               let payload = PStr [{(sf) with pstr_desc}] in
               let pstr_desc = Pstr_extension ((e, payload), ax) in
               {(s) with pstr_desc} 
-            ) td
+            ) (if is_novers then (List.append first_type (List.tl td)) else td) 
           in
           (*let () = Printf.printf "%s %d\n" (Pprintast.string_of_structure pex) (List.length ax) in*)
-          List.append pex strs
+          List.append novers_type (List.append pex strs)
         | _ -> assert false)  
       | _ -> s :: strs)
     | _ -> s :: strs
@@ -697,7 +786,7 @@ let impl sx =
           let td = AD.type_declaration ~loc ~name:{txt = type_name; loc}
             ~params:[] ~cstrs:[] ~kind ~private_:Public ~manifest:(Some ct)
           in
-          let td = {(td) with ptype_attributes = SD.get_attrs ~is_inner:false type_name} in
+          let td = {(td) with ptype_attributes = SD.get_attrs false type_name} in
           let app_funcs = gen_app_funcs ~loc type_name mod_name pe in                            
           s :: 
           Ast_builder.Default.pstr_type ~loc Recursive [td] :: 

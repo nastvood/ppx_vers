@@ -29,7 +29,7 @@ type tli = int list*)
   | Second of int*)
 
 (*type enmp1 = 
-  | First
+  | First 
   | Second of int
   | Third of (string * int) [@vers_set  ? `Third s when `Third (s, 0) ]
   [@@vers_num 1]*)
@@ -47,4 +47,10 @@ user =
   lx : int list;
   opt : string option;
 } *)
+
+type enm_novers =
+  | First [@migrate ? First when First]
+  | Second of int [@migrate ? Second x when Second x]
+
+type enm = enm_novers
 

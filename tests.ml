@@ -29,7 +29,7 @@ open Sexplib.Std
   surname: string [@migrate (try BatString.split "" p.Prev.name |> snd with | Not_found -> "")]
 } [@@deriving bin_io]*)
 
-type%vers[@novers] user = 
+(*type%vers[@novers] user = 
 {
   name: string;
   lx : int list;
@@ -47,7 +47,7 @@ type%vers[@novers] user =
   opt : string option;
   age: int;  
   surname: string [@migrate (try BatString.split "" p.Prev.name |> snd with | Not_found -> "")]
-} [@@deriving bin_io]
+} (*[@@deriving bin_io]*)*)
 
  
 (*type%vers address =
@@ -78,17 +78,16 @@ float list [@@migrate (List.map float p)]
   | `Third of (string * int) [@migrate ? `Third s when `Third (s, 0) ]
   ] [@@deriving bin_io]*)
 
-(*type%vers enm = 
-  | First
-  and enm =
+type%vers[@novers] enm = 
   | First
   | Second of int
-  and enm =
+  (*and enm =
   | First
   | Second of int
   | Third of string
   and enm =
   | First
   | Second of int
-  | Third of (string * string) [@migrate ? Prev.Third p when Third (p, p) ]
-  [@@deriving (bin_io, sexp, yojson)] [@@ptag]*)
+  | Third of (string * string) [@migrate ? Prev.Third p when Third (p, p) ]*)
+  [@@deriving bin_io] [@@deriving sexp] 
+  (*[@@deriving (bin_io, sexp, yojson)] [@@ptag]*)
