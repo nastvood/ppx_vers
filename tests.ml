@@ -3,6 +3,7 @@
 open Bin_prot.Std
 open Sexplib.Std
 
+
 (*type enmp1i25 = 
   | E1
   | E2 of int
@@ -28,6 +29,26 @@ open Sexplib.Std
   surname: string [@migrate (try BatString.split "" p.Prev.name |> snd with | Not_found -> "")]
 } [@@deriving bin_io]*)
 
+type%vers[@novers] user = 
+{
+  name: string;
+  lx : int list;
+  opt : string option;
+} and user =
+{
+  name: string;
+  lx : int list;
+  opt : string option;
+  age: int [@migrate 0]
+}  and user = 
+{
+  name: string;
+  lx : int list;
+  opt : string option;
+  age: int;  
+  surname: string [@migrate (try BatString.split "" p.Prev.name |> snd with | Not_found -> "")]
+} [@@deriving bin_io]
+
  
 (*type%vers address =
 {
@@ -38,8 +59,9 @@ open Sexplib.Std
 
 
 (*type%vers tli = int list
-
-type%vers tli = float list [@@migrate (List.map float p)]*)
+  and tli =
+float list [@@migrate (List.map float p)]
+[@@deriving bin_io]*)
 
 (*type%vers enmp = 
   [ `First 
@@ -56,7 +78,7 @@ type%vers tli = float list [@@migrate (List.map float p)]*)
   | `Third of (string * int) [@migrate ? `Third s when `Third (s, 0) ]
   ] [@@deriving bin_io]*)
 
-type%vers enm = 
+(*type%vers enm = 
   | First
   and enm =
   | First
@@ -69,5 +91,4 @@ type%vers enm =
   | First
   | Second of int
   | Third of (string * string) [@migrate ? Prev.Third p when Third (p, p) ]
-  (*[@@deriving (bin_io, sexp, yojson)][@@ptag]*)
-  [@@deriving (bin_io, sexp, yojson)] [@@ptag]
+  [@@deriving (bin_io, sexp, yojson)] [@@ptag]*)

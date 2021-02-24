@@ -12,7 +12,16 @@ let vers = "vers"
 let vers_num = "num"
 let vers_ptag = "ptag"
 let variant_int_size = 4
-let bin_io = "bin_io"
+
+let allowed_inner_attrs = [
+  ("deriving", "bin_io"); 
+  ("deriving", "sexp"); 
+  ("deriving", "sexp_of");
+  ("deriving", "of_sexp");
+  ("ptag",""); 
+  ("num", "");
+  ("migrate", "")
+] 
 
 module SD = struct (* str_descr*)
 
@@ -70,32 +79,36 @@ module SD = struct (* str_descr*)
     with | Not_found -> assert false      
 
   let add_attr a type_name =
-    let descr_attr a = 
+    let a_name = a.attr_name.txt in
+    let descr_attr a attrs = 
       match a.attr_payload with
       | PStr s ->
         if s = []
-        then [""]
-        else  
-          (match (List.hd s).pstr_desc with
-          | Pstr_eval (e, _) -> 
+        then ((a_name, ""), a) :: attrs
+        else 
+          let hd_s = List.hd s in
+          (match hd_s.pstr_desc with
+          | Pstr_eval (e, p) -> 
             (match e.pexp_desc with
-            | Pexp_ident i -> [Longident.name i.txt]
-            | Pexp_tuple ex ->
-              List.map (fun e ->
+            | Pexp_ident i ->
+              ((a_name, Longident.name i.txt), a) :: attrs
+            | Pexp_tuple ex when a_name = "deriving" ->
+              List.fold_right (fun e attrs ->
                 (match e.pexp_desc with
-                | Pexp_ident i -> Longident.name i.txt
+                | Pexp_ident i ->                   
+                  let e = {(e) with pexp_desc = Pexp_ident i} in
+                  let hd_s = {(hd_s) with pstr_desc = Pstr_eval (e, p)} in
+                  let s = hd_s :: List.tl s in
+                  let a = {(a) with attr_payload = PStr s} in
+                  ((a_name, Longident.name i.txt), a) :: attrs
                 | _ -> assert false)
-              ) ex
-            | _ -> [""])  
-          | _ -> [""])  
-      | _ -> [""]
+              ) ex attrs
+            | _ -> ((a_name, ""), a) :: attrs)  
+          | _ -> ((a_name, ""), a) :: attrs)  
+      | _ -> ((a_name, ""), a) :: attrs
     in    
-    let add attrs =
-      List.fold_left (fun attrs d ->
-        (*let () = Printf.printf "%s %s %s \n" type_name a.attr_name.txt descr in*)
-        ((a.attr_name.txt, d), a) :: attrs
-      ) attrs (descr_attr a)        
-    in
+   (*let () = Printf.printf "%s %s %s \n" type_name a.attr_name.txt descr in*)
+    let add attrs = descr_attr a attrs in
     try
       let attrs = Hashtbl.find h_attrs type_name in
       Hashtbl.replace h_attrs type_name (add attrs)
@@ -113,7 +126,22 @@ module SD = struct (* str_descr*)
       List.exists (fun ((aname, adescr), _) ->
         aname = name && adescr = descr
       ) attrs
-    with Not_found -> false         
+    with Not_found -> false
+
+  let get_attrs ~is_inner type_name =
+    List.fold_right (fun (descr, a) attrs -> 
+      if is_inner 
+      then 
+        (if List.mem descr allowed_inner_attrs 
+        then 
+          let () = Printf.printf "%s %s %s\n" (fst descr) (snd descr) type_name in
+          a :: attrs
+        else attrs)
+      else 
+        (if not (List.mem descr allowed_inner_attrs)          
+        then a :: attrs
+        else attrs)
+    ) (Hashtbl.find h_attrs type_name) []
 
 end
 
@@ -299,10 +327,10 @@ let type_kind_by_mod_expr pe =
   | _ -> assert false
 
 let gen_app_funcs ~loc type_name mod_name pe =
+  (*let () = Pprintast.module_expr Format.std_formatter pe in*)
   match pe.pmod_desc with
   | Pmod_structure sx ->
     (*let () = Printf.printf "%s\n\n" (Pprintast.string_of_structure sx) in*)
-    (*let () = Pprintast.module_expr Format.std_formatter pe in*)
     List.fold_right (fun s sx ->
       match s.pstr_desc with
       | Pstr_include i -> 
@@ -333,14 +361,6 @@ let gen_app_funcs ~loc type_name mod_name pe =
       | _ -> sx
     ) sx []
   | _ -> [] 
-
-(*let gen_bin_funcs ~loc type_name mod_name pe =  
-  List.map (fun s ->
-    let f_name = "bin_" ^ s  ^  "_" ^ type_name in
-    let f_name_l = AD.pvar ~loc f_name in
-    let e_r = AD.pexp_ident ~loc {txt = Longident.parse (mod_name ^ "." ^ f_name); loc} in
-    [%stri let [%p f_name_l] = [%e e_r]]
-  ) ["shape"; "reader"; "size"; "write"; "read"]*)
 
 let gen_last_write_fun ~loc type_name ver =  
   let f_name = "bin_write_" ^ type_name in
@@ -641,7 +661,7 @@ let preprocess_impl sx =
           let pex =
             List.mapi (fun i t ->
               let t = {(t) with ptype_attributes = 
-                  (*if i = last_i then all_attrs else List.append t.ptype_attributes all_attrs *)
+                  (*SD.get_attrs ~is_inner:true type_name*)
                   all_attrs
                 } 
               in
@@ -677,12 +697,11 @@ let impl sx =
           let td = AD.type_declaration ~loc ~name:{txt = type_name; loc}
             ~params:[] ~cstrs:[] ~kind ~private_:Public ~manifest:(Some ct)
           in
-          (*let td = {(td) with ptype_attributes = SD.get_attrs type_name} in*)
+          let td = {(td) with ptype_attributes = SD.get_attrs ~is_inner:false type_name} in
           let app_funcs = gen_app_funcs ~loc type_name mod_name pe in                            
           s :: 
           Ast_builder.Default.pstr_type ~loc Recursive [td] :: 
           (List.append app_funcs strs)
-
         else 
           let pe = patch_module_expr ~loc type_name kind pe in
           {(s) with pstr_desc = Pstr_module {(pm) with pmb_expr = pe}} :: strs
@@ -692,7 +711,7 @@ let impl sx =
 
 let () =
   Driver.register_transformation
-    ~rules:[rule_vers]
     ~preprocess_impl
+    ~rules:[rule_vers]
     ~impl
     vers
