@@ -698,6 +698,11 @@ let gen_novers_first_type ~loc type_name td =
     let ct = AD.ptyp_constr ~loc {txt = Longident.parse (type_name ^ "_" ^ vers_novers); loc} [] in
     AD.type_declaration ~loc ~name:{txt = type_name; loc} ~params:[] ~cstrs:[] ~kind:Ptype_abstract ~private_:Public 
       ~manifest:(Some ct)     
+  | Ptype_record _ldx ->
+    let ct = AD.ptyp_constr ~loc {txt = Longident.parse (type_name ^ "_" ^ vers_novers); loc} [] in 
+    let ld = AD.label_declaration ~loc ~name:{txt = vers_novers ^ "_field"; loc} ~mutable_:Immutable ~type_:ct in
+    let kind = Ptype_record [ld] in
+    AD.type_declaration ~loc ~name:{txt = type_name; loc} ~params:[] ~cstrs:[] ~kind ~private_:Public ~manifest:None     
   | _ -> assert false
 
 let gen_novers_second_type ~loc type_name td =
@@ -724,6 +729,21 @@ let gen_novers_second_type ~loc type_name td =
       ) cdx
     in 
     {(td) with ptype_kind = Ptype_variant cdx}
+  | Ptype_record ldx -> 
+    let ldx =
+      List.map (fun ld ->
+        let p = AD.pexp_ident ~loc {txt = Longident.parse "p"; loc} in
+        let prev = AD.pexp_field ~loc p {txt = Longident.parse "Prev.novers_field"; loc} in 
+        let pe = AD.pexp_field ~loc prev {txt = Longident.parse ld.pld_name.txt; loc} in
+        let s = AD.pstr_eval ~loc pe [] in
+        let attr = AD.attribute ~loc ~name:{txt = vers_set; loc} ~payload:(PStr [s]) in
+        {(ld) with pld_attributes = attr :: ld.pld_attributes}
+      ) ldx 
+    in
+    let ct = AD.ptyp_constr ~loc {txt = Longident.parse (type_name ^ "_" ^ vers_novers); loc} [] in 
+    let lb = AD.label_declaration ~loc ~name:{txt = vers_novers; loc} ~mutable_:Immutable ~type_:ct in
+    let kind = Ptype_record ldx in
+    AD.type_declaration ~loc ~name:{txt = type_name; loc} ~params:[] ~cstrs:[] ~kind ~private_:Public ~manifest:None     
   | _ -> assert false
 
 let gen_novers ~loc type_name rf td attrs =     
