@@ -6,6 +6,14 @@
  (preprocess (pps ppx_bin_prot ppx_deriving_yojson ppx_sexp_conv ppx_vers))
  )
 
+(executables 
+ (names UserT)
+ (modes byte)
+ (modules UserT)
+ (libraries bin_prot sexplib yojson)
+ (preprocess (pps ppx_bin_prot ppx_deriving_yojson ppx_sexp_conv ppx_vers))
+)
+
 ;;(executables 
 ;; (names tests_done)
 ;; (modes byte)

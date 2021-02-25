@@ -82,7 +82,7 @@ open Sexplib.Std
 float list [@@migrate (List.map float p)]
 [@@deriving bin_io]*)
 
-(*type%vers tli = int list
+(*type%vers[@novers] tli = int list
   and tli =
 float list [@@migrate (List.map float p)]
 [@@deriving (bin_io, sexp, yojson)]*)
@@ -107,7 +107,7 @@ float list [@@migrate (List.map float p)]
   | `Third of (string * int) [@migrate ? `Third s when `Third (s, 0) ]
   ] [@@deriving bin_io]*)
 
-type%vers[@novers] enmp = 
+(*type%vers[@novers] enmp = 
   [ `First 
   ] and enmp =
   [ `First
@@ -120,9 +120,15 @@ type%vers[@novers] enmp =
   [ `First
   | `Second of int
   | `Third of (string * int) [@migrate ? `Third s when `Third (s, 0) ]
-  ] [@@deriving bin_io]
+  ] (*[@@deriving bin_io]*)
 
-(*type%vers[@novers] enm = 
+type%vers[@novers] t = {
+    field1: enmp [@from_novers];
+    field2: enmp;
+    field3: string
+  } (*[@@deriving bin_io]*)*)
+
+type%vers[@novers] enm = 
   | First
   | Second of int
   and enm =
@@ -133,4 +139,4 @@ type%vers[@novers] enmp =
   | First
   | Second of int
   | Third of (string * string) [@migrate ? Prev.Third p when Third (p, p) ]
-  [@@deriving (bin_io, sexp, yojson)] [@@ptag]*)
+  (*[@@deriving (bin_io, sexp, yojson)] [@@ptag]*)

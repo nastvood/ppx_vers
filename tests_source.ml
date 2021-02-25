@@ -48,15 +48,25 @@ user =
   opt : string option;
 } *)
 
-type enm_novers =
+(*type enm_novers =
   [ `First [@migrate ? `First when `First]
   | `Second of int [@migrate ? `Second x when `Second x]
   ]
 
-type enm = enm_novers
+type enm = enm_novers*)
 
 (*type tli_novers = int list
 
 type tli = int list [@@migrate p]*)
 
-(*type a = [`A1 | `A2]*)
+type a = [`A1 | `A2]
+
+type user =
+{
+  name: string;
+  lx : int list;
+  opt : string option;
+  pa : a
+}
+
+let f (x:t) = V4_enmp.upgrade (V3_enmp.upgrade (V2_enmp.upgrade (V1_enmp.upgrade x)))
