@@ -154,10 +154,12 @@ module SD = struct (* str_descr*)
       ) attrs
     with Not_found -> false
 
-  let get_all_attrs type_name =
+  let get_all_attrs ~excl type_name =
     try 
       List.fold_right (fun (descr, a) attrs -> 
-        (descr, a) :: attrs
+        if List.mem descr excl
+        then attrs
+        else (descr, a) :: attrs
       ) (Hashtbl.find h_attrs type_name) [] |> group_deriving
     with Not_found -> []      
 
@@ -188,14 +190,19 @@ let data_by_mod_name mod_name =
     Some (ver, name)  
   with | _ -> None    
 
-let vers_set_payload attrs =
+let vers_set_by_attrs attrs =  
   if attrs = []
   then None
   else
     try
       let attr = List.find (fun a -> a.attr_name.txt = vers_set) attrs in
-      Some attr.attr_payload
+      Some attr
     with Not_found -> None 
+
+let vers_set_payload attrs =
+  match vers_set_by_attrs attrs with
+  | Some attr -> Some attr.attr_payload
+  | None -> None
 
 let expr_by_payload payload =    
   (match payload with
@@ -632,6 +639,8 @@ let patch_bin_io_incl_last ~loc ver first_ver incl type_name type_kind pm isx s 
           gen_last_write_fun ~loc type_name ver :: s :: isx
         | Ppat_var l when l.txt = "bin_reader_" ^ type_name -> 
           gen_last_read_fun ~loc type_name ver first_ver :: s :: isx
+        | Ppat_var l when l.txt = "bin_size_" ^ type_name -> 
+          s :: gen_last_size_fun ~loc type_name  :: isx              
         | Ppat_constraint (p, _) -> 
           if SD.exists_attr "ptag" "" type_name 
           then  patch_ptag ~loc p type_name type_kind s isx
@@ -703,6 +712,17 @@ let gen_novers_first_type ~loc type_name td =
     let ld = AD.label_declaration ~loc ~name:{txt = vers_novers ^ "_field"; loc} ~mutable_:Immutable ~type_:ct in
     let kind = Ptype_record [ld] in
     AD.type_declaration ~loc ~name:{txt = type_name; loc} ~params:[] ~cstrs:[] ~kind ~private_:Public ~manifest:None     
+  | Ptype_abstract -> 
+    (match td.ptype_manifest with
+    | Some {ptyp_desc = Ptyp_variant (rfx, clf, lx_opt); _} -> 
+      let ct = AD.ptyp_constr ~loc {txt = Longident.parse (type_name ^ "_" ^ vers_novers); loc} [] in
+      AD.type_declaration ~loc ~name:{txt = type_name; loc} ~params:[] ~cstrs:[] ~kind:Ptype_abstract ~private_:Public 
+        ~manifest:(Some ct)           
+    | Some _ ->       
+      let ct = AD.ptyp_constr ~loc {txt = Longident.parse (type_name ^ "_" ^ vers_novers); loc} [] in
+      AD.type_declaration ~loc ~name:{txt = type_name; loc} ~params:[] ~cstrs:[] ~kind:Ptype_abstract ~private_:Public 
+        ~manifest:(Some ct)     
+    | _ -> assert false)
   | _ -> assert false
 
 let gen_novers_second_type ~loc type_name td =
@@ -744,6 +764,41 @@ let gen_novers_second_type ~loc type_name td =
     let lb = AD.label_declaration ~loc ~name:{txt = vers_novers; loc} ~mutable_:Immutable ~type_:ct in
     let kind = Ptype_record ldx in
     AD.type_declaration ~loc ~name:{txt = type_name; loc} ~params:[] ~cstrs:[] ~kind ~private_:Public ~manifest:None     
+  | Ptype_abstract -> 
+    (match td.ptype_manifest with
+    | Some ({ptyp_desc = Ptyp_variant (rfx, clf, lx_opt); _} as ct) ->
+      let rfx =
+        List.map (fun rf ->
+          let (p, e) =
+            let (tag_name, exists_constr) = match rf.prf_desc with Rtag (l, _, ctlx) -> (l.txt, ctlx <> []) | Rinherit _ -> assert false in
+            (AD.ppat_variant ~loc tag_name (if exists_constr then Some(AD.ppat_var ~loc {txt = "x"; loc}) else None),
+              AD.pexp_variant ~loc tag_name (if exists_constr then Some(AD.pexp_ident ~loc {txt = Lident "x"; loc}) else None))
+            (*if exists_constr
+            then
+              let p = AD.ppat_construct ~loc {txt = Longident.parse tag_name; loc} (Some (AD.ppat_var ~loc {txt = "x"; loc})) in
+              let pct = AD.ptyp_constr ~loc {txt = Longident.parse ("Prev." ^ type_name); loc} [] in
+              (AD.ppat_constraint ~loc p pct,
+              AD.pexp_construct ~loc {txt = Lident tag_name; loc} (Some (AD.pexp_ident ~loc {txt = Lident "x"; loc})))
+            else   
+              let p = AD.ppat_construct ~loc {txt = Longident.parse tag_name; loc} None in
+              let pct = AD.ptyp_constr ~loc {txt = Longident.parse ("Prev." ^ type_name); loc} [] in
+              (AD.ppat_constraint ~loc p pct,
+              AD.pexp_construct ~loc {txt = Lident tag_name; loc} None)*)
+          in
+          let attr = AD.attribute ~loc ~name:{txt = vers_set; loc} ~payload:(PPat (p, Some e)) in
+          {(rf) with prf_attributes = attr :: rf.prf_attributes}          
+        ) rfx 
+      in 
+      {(td) with ptype_manifest = Some {(ct) with ptyp_desc = Ptyp_variant (rfx, clf, lx_opt)}}      
+    | Some ct -> 
+      (*let ct = AD.ptyp_constr ~loc {txt = Longident.parse (type_name ^ "_" ^ vers_novers); loc} [] in*)
+      let td = AD.type_declaration ~loc ~name:{txt = type_name; loc} ~params:[] ~cstrs:[] ~kind:Ptype_abstract ~private_:Public 
+        ~manifest:(Some ct)     
+      in
+      let s = AD.pstr_eval ~loc [%expr p] [] in
+      let attr = AD.attribute ~loc ~name:{txt = vers_set; loc} ~payload:(PStr [s]) in
+      {(td) with ptype_attributes = attr :: td.ptype_attributes}     
+    | _ -> assert false)
   | _ -> assert false
 
 let gen_novers ~loc type_name rf td attrs =     
@@ -768,19 +823,24 @@ let preprocess_impl sx =
           let last_i = List.length td - 1 in
           let all_attrs = List.append hd_td.ptype_attributes (List.nth td last_i).ptype_attributes  in
           let () = SD.add_attrs all_attrs type_name in
-          let ins_attrs = SD.get_all_attrs type_name in
+          let ins_attrs = SD.get_all_attrs ~excl:[(vers_set, "")] type_name in
           let is_novers = List.exists (fun a -> a.attr_name.txt = vers_novers) hd_td.ptype_attributes in
           let (novers_type, first_type) = if is_novers then gen_novers ~loc type_name rf hd_td ins_attrs else ([], [] ) in
           let pex =
             List.mapi (fun i t ->
+              let ins_attrs =
+                match vers_set_by_attrs t.ptype_attributes with
+                | Some attr -> attr :: ins_attrs
+                | None -> ins_attrs
+              in
               let t = {(t) with ptype_attributes = ins_attrs} in
               let pstr_desc = Pstr_type (rf, [t]) in
               let payload = PStr [{(sf) with pstr_desc}] in
               let pstr_desc = Pstr_extension ((e, payload), ax) in
+              (*let () = Printf.printf "%s\n" (Pprintast.string_of_structure [{(s) with pstr_desc}]) in*)
               {(s) with pstr_desc} 
             ) (if is_novers then (List.append first_type (List.tl td)) else td) 
           in
-          (*let () = Printf.printf "%s %d\n" (Pprintast.string_of_structure pex) (List.length ax) in*)
           List.append novers_type (List.append pex strs)
         | _ -> assert false)  
       | _ -> s :: strs)

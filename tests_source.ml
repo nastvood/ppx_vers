@@ -48,27 +48,15 @@ user =
   opt : string option;
 } *)
 
-(*type enm_novers =
-  | First [@migrate ? First when First]
-  | Second of int [@migrate ? Second x when Second x]
+type enm_novers =
+  [ `First [@migrate ? `First when `First]
+  | `Second of int [@migrate ? `Second x when `Second x]
+  ]
 
-type enm = enm_novers*)
+type enm = enm_novers
 
-type user_novers = 
-{
-  name: string;
-  age: int 
-}
+(*type tli_novers = int list
 
-type user =
-  {
-    novers_field : user_novers
-  }
+type tli = int list [@@migrate p]*)
 
-type user =
-  {
-    name: string; [@migrate p.Prev.novers_field.name]
-    age: int [@migrate p.Prev.novers_field.age]
-  }  
-
-
+(*type a = [`A1 | `A2]*)

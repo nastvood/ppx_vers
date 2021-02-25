@@ -29,7 +29,7 @@ open Sexplib.Std
   surname: string [@migrate (try BatString.split "" p.Prev.name |> snd with | Not_found -> "")]
 } [@@deriving bin_io]*)
 
-type%vers[@novers] user = 
+(*type%vers[@novers] user = 
 {
   name: string;
   lx : int list;
@@ -47,7 +47,7 @@ type%vers[@novers] user =
   opt : string option;
   age: int;  
   surname: string [@migrate (try BatString.split "" p.Prev.name |> snd with | Not_found -> "")]
-} [@@deriving bin_io]
+} [@@deriving bin_io]*)
 
 (*type%vers[@novers] user = 
 {
@@ -77,11 +77,20 @@ type%vers[@novers] user =
   number: int;
 } [@@deriving bin_io]*)
 
-
 (*type%vers tli = int list
   and tli =
 float list [@@migrate (List.map float p)]
 [@@deriving bin_io]*)
+
+(*type%vers tli = int list
+  and tli =
+float list [@@migrate (List.map float p)]
+[@@deriving (bin_io, sexp, yojson)]*)
+
+(*type%vers[@novers] tli = int list
+  and tli =
+float list [@@migrate (List.map float p)]
+[@@deriving (bin_io)]*)
 
 (*type%vers enmp = 
   [ `First 
@@ -97,6 +106,21 @@ float list [@@migrate (List.map float p)]
   | `Second of int
   | `Third of (string * int) [@migrate ? `Third s when `Third (s, 0) ]
   ] [@@deriving bin_io]*)
+
+type%vers[@novers] enmp = 
+  [ `First 
+  ] and enmp =
+  [ `First
+  | `Second of int
+  ] and enmp =
+  [ `First
+  | `Second of int
+  | `Third of string
+  ] and enmp =
+  [ `First
+  | `Second of int
+  | `Third of (string * int) [@migrate ? `Third s when `Third (s, 0) ]
+  ] [@@deriving bin_io]
 
 (*type%vers[@novers] enm = 
   | First
