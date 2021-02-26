@@ -5,6 +5,6 @@
   (preprocess (pps ppxlib.metaquot))
 )
 
-(env
-  (dev
-    (flags (:standard -w -26 -w -49 -w -27))))
+;;(env
+;;  (dev
+;;    (flags (:standard -w -26 -w -49 -w -27))))

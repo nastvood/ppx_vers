@@ -128,7 +128,7 @@ float list [@@migrate (List.map float p)]
     field3: string
   } (*[@@deriving bin_io]*)*)
 
-type%vers[@novers] enm = 
+(*type%vers[@novers] enm = 
   | First
   | Second of int
   and enm =
@@ -139,15 +139,24 @@ type%vers[@novers] enm =
   | First
   | Second of int
   | Third of (string * string) [@migrate ? Prev.Third p when Third (p, p) ]
-  (*[@@deriving (bin_io, sexp, yojson)] [@@ptag]*)
+  (*[@@deriving (bin_io, sexp, yojson)] [@@ptag]*)*)
 
 (*type%vers[@novers] t = 
 | Enm_novers of enm  
 | Enm of enm  
 | Nothing *)
 
-type%vers[@novers] tenm = 
+(*type%vers[@novers] tenm = 
 [ `Enm_novers of enm [@from_novers]
 | `Enm of enm  
 | `Nothing 
-]
+]*)
+
+let a =  
+  let v = 1 in 
+  match v with 
+  | 1 -> ()
+  | 1 -> assert false
+  | _ -> ()
+
+
