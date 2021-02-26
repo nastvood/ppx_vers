@@ -120,9 +120,9 @@ float list [@@migrate (List.map float p)]
   [ `First
   | `Second of int
   | `Third of (string * int) [@migrate ? `Third s when `Third (s, 0) ]
-  ] (*[@@deriving bin_io]*)
+  ] (*[@@deriving bin_io]*)*)
 
-type%vers[@novers] t = {
+(*type%vers[@novers] tenmp = {
     field1: enmp [@from_novers];
     field2: enmp;
     field3: string
@@ -140,3 +140,14 @@ type%vers[@novers] enm =
   | Second of int
   | Third of (string * string) [@migrate ? Prev.Third p when Third (p, p) ]
   (*[@@deriving (bin_io, sexp, yojson)] [@@ptag]*)
+
+(*type%vers[@novers] t = 
+| Enm_novers of enm  
+| Enm of enm  
+| Nothing *)
+
+type%vers[@novers] tenm = 
+[ `Enm_novers of enm [@from_novers]
+| `Enm of enm  
+| `Nothing 
+]

@@ -59,9 +59,9 @@ type enm = enm_novers*)
 
 type tli = int list [@@migrate p]*)
 
-type a = [`A1 | `A2]
+type a = [`A1 of (int list) | `A2]
 
-type user =
+(*type user =
 {
   name: string;
   lx : int list;
@@ -69,4 +69,4 @@ type user =
   pa : a
 }
 
-let f (x:t) = V4_enmp.upgrade (V3_enmp.upgrade (V2_enmp.upgrade (V1_enmp.upgrade x)))
+let f (x:t) = V4_enmp.upgrade (V3_enmp.upgrade (V2_enmp.upgrade (V1_enmp.upgrade x)))*)
