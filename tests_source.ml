@@ -55,11 +55,10 @@ user =
 
 type enm = enm_novers*)
 
-(*type tli_novers = int list
+(*type tli_novers = int list*)
 
-type tli = int list [@@migrate p]*)
+type tli = int list [@@migrate]
 
-type a = [`A1 of (int list) | `A2]
 
 (*type user =
 {

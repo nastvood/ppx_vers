@@ -213,6 +213,22 @@ let attr_by_name name attrs =
 let exists_attr name attrs =
   attr_by_name name attrs <> None    
 
+let exists_payload_attr name attrs =
+  match attr_by_name name attrs with
+  | Some attr ->     
+    (match attr.attr_payload with
+    | PStr s -> s <> []
+    | PSig s -> s <> []
+    | _ -> true)
+  | None -> false
+
+let replace_attr_name old_name new_name attrs =
+  List.map (fun a ->
+    if a.attr_name.txt = old_name
+    then {(a) with attr_name = {(a.attr_name) with txt = new_name}}
+    else a  
+  ) attrs  
+
 let vers_set_payload attrs =
   match attr_by_name vers_set attrs with
   | Some attr -> Some attr.attr_payload
@@ -771,16 +787,20 @@ let gen_novers_second_type ~loc type_name novers_names td =
         let p = AD.pexp_ident ~loc {txt = Longident.parse "p"; loc} in
         let prev = AD.pexp_field ~loc p {txt = Longident.parse ("Prev." ^ novers_field_name); loc} in 
         let pe = AD.pexp_field ~loc prev {txt = Longident.parse ld.pld_name.txt; loc} in
-        let pe =
+        let payload =
           if exists_attr from_novers ld.pld_attributes
           then 
-            let type_name = List.nth novers_names i in
-            let type_name_novers = type_name ^ "_" ^ vers_novers in
-            AD.pexp_apply ~loc (AD.pexp_ident ~loc {txt = Longident.parse (type_name ^ "_from_" ^ type_name_novers); loc}) [(Nolabel, pe)]
-          else pe
+            if exists_payload_attr from_novers ld.pld_attributes
+            then 
+              (attr_by_name from_novers ld.pld_attributes |> BatOption.get).attr_payload 
+            else  
+              let type_name = List.nth novers_names i in
+              let type_name_novers = type_name ^ "_" ^ vers_novers in
+              let pe = AD.pexp_apply ~loc (AD.pexp_ident ~loc {txt = Longident.parse (type_name ^ "_from_" ^ type_name_novers); loc}) [(Nolabel, pe)] in
+              PStr [AD.pstr_eval ~loc pe []]
+          else PStr [AD.pstr_eval ~loc pe []]
         in      
-        let s = AD.pstr_eval ~loc pe [] in
-        let attr = AD.attribute ~loc ~name:{txt = vers_set; loc} ~payload:(PStr [s]) in
+        let attr = AD.attribute ~loc ~name:{txt = vers_set; loc} ~payload in
         {(ld) with pld_attributes = attr :: ld.pld_attributes}
       ) ldx 
     in
@@ -829,23 +849,26 @@ let string_of_core_type_list ctx =
     Format.flush_str_formatter ()
   ) ctx |> String.concat " "   
 
+let _simple_types = ["int"; "float"; "bool"; "string"; "char"; "option"; "array"; "list"]  
+
 let ct_to_novers type_name name ct =
   let longident_to_novers l =
     let txt =
       match l.txt with
-      | Lident type_name -> Lident (type_name ^ "_" ^ vers_novers)
-      | Ldot (l, type_name) -> Ldot (l, type_name ^ "_" ^ vers_novers)
+      | Lident type_name ->
+        Lident (if List.mem type_name _simple_types then type_name else type_name ^ "_" ^ vers_novers)
+      | Ldot (l, type_name) ->
+        Ldot (l, if List.mem type_name _simple_types then type_name else type_name ^ "_" ^ vers_novers)
       | Lapply _ -> assert false
     in 
     {(l) with txt}      
   in   
-  let simple_types = ["int"; "float"; "bool"; "string"; "char"] in
   let parse ct =
     let (ptyp_desc, novers_name) =
       match ct.ptyp_desc with
       | Ptyp_constr (l, []) -> 
         let t_name = Longident.name l.txt in
-        if List.mem t_name simple_types
+        if List.mem t_name _simple_types
         then failwith (Printf.sprintf "only simple user types are used for [@%s] (type: %s, %s, %s)" from_novers type_name name t_name)
         else (Ptyp_constr (longident_to_novers l, []), Longident.name l.txt)
       | Ptyp_constr (l, ctx) ->         
@@ -859,6 +882,41 @@ let ct_to_novers type_name name ct =
   in        
   parse ct
 
+let ct_to_novers_rec type_name name ct =
+  let longident_loc_to_novers l =
+    let rec longident_to_novers l =
+      match l with
+      | Lident type_name -> 
+        Lident (if List.mem type_name _simple_types then type_name else type_name ^ "_" ^ vers_novers)
+      | Ldot (l, type_name) -> 
+        Ldot (longident_to_novers l, if List.mem type_name _simple_types then type_name else type_name ^ "_" ^ vers_novers)
+      | Lapply _ -> assert false
+    in   
+    let txt = longident_to_novers l.txt in
+    {(l) with txt}      
+  in   
+  let rec parse ct =
+    let ptyp_desc =
+      match ct.ptyp_desc with
+      | Ptyp_constr (l, []) -> 
+        let t_name = Longident.name l.txt in
+        if List.mem t_name _simple_types
+        then failwith (Printf.sprintf "only simple user types are used for [@%s] (type: %s, %s, %s)" from_novers type_name name t_name)
+        else Ptyp_constr (longident_loc_to_novers l, [])
+      | Ptyp_constr (l, ctx) ->    
+        let t_name = Longident.name l.txt in
+        if List.mem t_name _simple_types
+        then Ptyp_constr (l, List.map parse ctx)
+        else Ptyp_constr (longident_loc_to_novers l, List.map parse ctx)     
+      | _ ->
+        let () = Pprintast.core_type Format.str_formatter ct in
+        let s = Format.flush_str_formatter () in
+        failwith (Printf.sprintf "only simple user types are used for [@%s] (type: %s, %s, %s)" from_novers type_name name s)
+    in
+    {(ct) with ptyp_desc}
+  in        
+  parse ct
+
 let gen_novers ~loc type_name rf td attrs =     
   let td_novers = {(td) with ptype_name = {txt = type_name ^ "_" ^ vers_novers; loc}; ptype_attributes = attrs} in
   let (td_novers, novers_names) =
@@ -868,8 +926,13 @@ let gen_novers ~loc type_name rf td attrs =
         List.map (fun ld -> 
           if exists_attr from_novers ld.pld_attributes
           then 
-            let (pld_type, novers_name) = ct_to_novers type_name ld.pld_name.txt ld.pld_type in
-            ({(ld) with pld_attributes = remove_attr from_novers ld.pld_attributes; pld_type}, novers_name)
+            if exists_payload_attr from_novers ld.pld_attributes 
+            then  
+              let pld_type = ct_to_novers_rec type_name ld.pld_name.txt ld.pld_type in
+              ({(ld) with pld_attributes = remove_attr from_novers ld.pld_attributes; pld_type}, "")
+            else              
+              let (pld_type, novers_name) = ct_to_novers type_name ld.pld_name.txt ld.pld_type in
+              ({(ld) with pld_attributes = remove_attr from_novers ld.pld_attributes; pld_type}, novers_name)
           else (ld, "")   
         ) ldx 
       in
