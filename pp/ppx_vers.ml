@@ -15,7 +15,7 @@ let vers_novers = "novers"
 let variant_int_size = 4
 let bin_io = "bin_io"
 let from_novers = "from_novers"
-let novers_field_name = "novers_field"
+let novers_field_name = "_novers_field"
 let allowed_inner_attrs = [
   ("deriving", bin_io); 
   ("deriving", "bin_read"); 
@@ -345,6 +345,27 @@ let get_upgrade_fun ~loc type_name td =
     [%stri let upgrade p = [%e m] ]
   | Ptype_open -> assert false
 
+let clean_attrs td =
+  let clean attrs = remove_attr from_novers (remove_attr vers_set attrs) in
+    match td.ptype_kind with
+    | Ptype_record ldx ->
+      let ldx = List.map (fun ld -> {(ld) with pld_attributes = clean ld.pld_attributes}) ldx in
+      {(td) with ptype_kind = Ptype_record ldx}
+    | Ptype_variant cdx -> 
+      let cdx = List.map (fun cd -> {(cd) with pcd_attributes = clean cd.pcd_attributes}) cdx in
+      {(td) with ptype_kind = Ptype_variant cdx}
+    | Ptype_abstract ->  
+      (match td.ptype_manifest with
+      | Some ({ptyp_desc = Ptyp_variant (rfx, clf, lx_opt); _} as ct) -> 
+        let rfx = List.map (fun rf -> {(rf) with prf_attributes = clean rf.prf_attributes}) rfx in
+        let ct = {(ct) with ptyp_desc = Ptyp_variant (rfx, clf, lx_opt)} in
+        {(td) with ptype_manifest = Some ct}
+      | Some ct -> 
+        let ct = {(ct) with ptyp_attributes = clean ct.ptyp_attributes} in
+        {(td) with ptype_manifest = Some ct}
+      | None -> td)
+    | Ptype_open -> td  
+
 let expand_ver ~ctxt payload = 
   let loc = Expansion_context.Extension.extension_point_loc ctxt in
   match payload with
@@ -352,12 +373,13 @@ let expand_ver ~ctxt payload =
     let first_struct = List.hd s in 
     let first_struct =
       match first_struct.pstr_desc with
-      | Pstr_type (_, td) when List.length td = 1 ->  
+      | Pstr_type (rf, td) when List.length td = 1 ->  
         let hd_td = List.hd td in
+        let td_clean = clean_attrs hd_td in
         let type_name = hd_td.ptype_name.txt in
         let (cnt, first_ver) = SD.init type_name hd_td in
         let mod_name = mod_name_by_cnt type_name cnt in
-        let sts = [first_struct] in
+        (*let sts = [first_struct] in*)
         let sts =
           if cnt > first_ver
           then 
@@ -365,11 +387,11 @@ let expand_ver ~ctxt payload =
             let lm = AD.pmod_ident ~loc {txt = Lident prev_mod_name; loc} in
             get_upgrade_fun ~loc type_name hd_td ::
             [%stri module Prev = [%m lm] ] :: 
-            sts |> List.rev
-          else sts             
+            (*sts*) [{(first_struct) with pstr_desc = Pstr_type (rf, [td_clean])}] |> List.rev
+          else (*sts*)[{(first_struct) with pstr_desc = Pstr_type (rf, [td_clean])}]
         in
         let m = AD.pmod_structure ~loc sts in
-        let mb =  AD.module_binding ~loc ~name:{txt = Some mod_name; loc} ~expr:m in
+        let mb = AD.module_binding ~loc ~name:{txt = Some mod_name; loc} ~expr:m in
         let () = SD.incr type_name hd_td in
         AD.pstr_module ~loc mb
       | Pstr_type _ -> failwith "Only one typedef in type definition"  
@@ -732,7 +754,7 @@ let gen_novers_first_type ~loc type_name td =
       ~manifest:(Some ct)     
   | Ptype_record _ldx ->
     let ct = AD.ptyp_constr ~loc {txt = Longident.parse (type_name ^ "_" ^ vers_novers); loc} [] in 
-    let ld = AD.label_declaration ~loc ~name:{txt = vers_novers ^ "_field"; loc} ~mutable_:Immutable ~type_:ct in
+    let ld = AD.label_declaration ~loc ~name:{txt = novers_field_name; loc} ~mutable_:Immutable ~type_:ct in
     let kind = Ptype_record [ld] in
     AD.type_declaration ~loc ~name:{txt = type_name; loc} ~params:[] ~cstrs:[] ~kind ~private_:Public ~manifest:None     
   | Ptype_abstract -> 
@@ -757,26 +779,32 @@ let gen_novers_second_type ~loc type_name novers_names td =
           let exists_constr = match cd.pcd_args with Pcstr_tuple ctx -> ctx <> [] | Pcstr_record lbdx -> lbdx <> [] in
           if exists_constr
           then            
-            let p = AD.ppat_construct ~loc {txt = Longident.parse cd.pcd_name.txt; loc} (Some (AD.ppat_var ~loc {txt = "x"; loc})) in
-            let pct = AD.ptyp_constr ~loc {txt = Longident.parse ("Prev." ^ type_name); loc} [] in
-            let pe = AD.pexp_ident ~loc {txt = Lident "x"; loc} in
-            let pe = 
-              if exists_attr from_novers cd.pcd_attributes
-              then 
-                let type_name = match cd.pcd_args with Pcstr_tuple [{ptyp_desc = Ptyp_constr (l, _); _}] -> Longident.name l.txt | _ -> assert false in
-                let type_name_novers = type_name ^ "_" ^ vers_novers in
-                AD.pexp_apply ~loc (AD.pexp_ident ~loc {txt = Longident.parse (type_name ^ "_from_" ^ type_name_novers); loc}) [(Nolabel, pe)]
-              else pe
-            in      
-            (AD.ppat_constraint ~loc p pct,
-            AD.pexp_construct ~loc {txt = Lident cd.pcd_name.txt; loc} (Some pe))
+            if exists_attr from_novers cd.pcd_attributes && exists_payload_attr from_novers cd.pcd_attributes
+            then               
+              (match (attr_by_name from_novers cd.pcd_attributes |> BatOption.get).attr_payload with
+              | PPat (p, e) -> (p, e)
+              | _ -> assert false)
+            else  
+              let p = AD.ppat_construct ~loc {txt = Longident.parse cd.pcd_name.txt; loc} (Some (AD.ppat_var ~loc {txt = "x"; loc})) in
+              let pct = AD.ptyp_constr ~loc {txt = Longident.parse ("Prev." ^ type_name); loc} [] in
+              let pe = AD.pexp_ident ~loc {txt = Lident "x"; loc} in
+              let pe = 
+                if exists_attr from_novers cd.pcd_attributes
+                then 
+                  let type_name = match cd.pcd_args with Pcstr_tuple [{ptyp_desc = Ptyp_constr (l, _); _}] -> Longident.name l.txt | _ -> assert false in
+                  let type_name_novers = type_name ^ "_" ^ vers_novers in
+                  AD.pexp_apply ~loc (AD.pexp_ident ~loc {txt = Longident.parse (type_name ^ "_from_" ^ type_name_novers); loc}) [(Nolabel, pe)]
+                else pe
+              in      
+              (AD.ppat_constraint ~loc p pct,
+              Some (AD.pexp_construct ~loc {txt = Lident cd.pcd_name.txt; loc} (Some pe)))
           else   
             let p = AD.ppat_construct ~loc {txt = Longident.parse cd.pcd_name.txt; loc} None in
             let pct = AD.ptyp_constr ~loc {txt = Longident.parse ("Prev." ^ type_name); loc} [] in
             (AD.ppat_constraint ~loc p pct,
-            AD.pexp_construct ~loc {txt = Lident cd.pcd_name.txt; loc} None)
+            Some (AD.pexp_construct ~loc {txt = Lident cd.pcd_name.txt; loc} None))
         in
-        let attr = AD.attribute ~loc ~name:{txt = vers_set; loc} ~payload:(PPat (p, Some e)) in
+        let attr = AD.attribute ~loc ~name:{txt = vers_set; loc} ~payload:(PPat (p, e)) in
         {(cd) with pcd_attributes = attr :: cd.pcd_attributes}          
       ) cdx
     in 
@@ -791,8 +819,7 @@ let gen_novers_second_type ~loc type_name novers_names td =
           if exists_attr from_novers ld.pld_attributes
           then 
             if exists_payload_attr from_novers ld.pld_attributes
-            then 
-              (attr_by_name from_novers ld.pld_attributes |> BatOption.get).attr_payload 
+            then (attr_by_name from_novers ld.pld_attributes |> BatOption.get).attr_payload 
             else  
               let type_name = List.nth novers_names i in
               let type_name_novers = type_name ^ "_" ^ vers_novers in
@@ -813,22 +840,28 @@ let gen_novers_second_type ~loc type_name novers_names td =
         List.mapi (fun i rf ->
           let (p, e) =
             let (tag_name, exists_constr) = match rf.prf_desc with Rtag (l, _, ctlx) -> (l.txt, ctlx <> []) | Rinherit _ -> assert false in
-            let pe =
-              if exists_attr from_novers rf.prf_attributes && exists_constr
-              then 
-                let type_name = List.nth novers_names i in
-                let type_name_novers = type_name ^ "_" ^ vers_novers in
-                let pe = AD.pexp_ident ~loc {txt = Lident "x"; loc} in
-                Some(AD.pexp_apply ~loc (AD.pexp_ident ~loc {txt = Longident.parse (type_name ^ "_from_" ^ type_name_novers); loc}) [(Nolabel, pe)])
-              else 
-                if exists_constr 
-                then Some(AD.pexp_ident ~loc {txt = Lident "x"; loc})
-                else None
-            in
-            (AD.ppat_variant ~loc tag_name (if exists_constr then Some(AD.ppat_var ~loc {txt = "x"; loc}) else None),
-              AD.pexp_variant ~loc tag_name pe)
+            if exists_attr from_novers rf.prf_attributes && exists_constr && exists_payload_attr from_novers rf.prf_attributes (* from_novers with payload*)
+            then
+              (match (attr_by_name from_novers rf.prf_attributes |> BatOption.get).attr_payload with
+              | PPat (p, e) -> (p, e)
+              | _ -> assert false)
+            else
+              let pe =
+                if exists_attr from_novers rf.prf_attributes && exists_constr
+                then 
+                  let type_name = List.nth novers_names i in
+                  let type_name_novers = type_name ^ "_" ^ vers_novers in
+                  let pe = AD.pexp_ident ~loc {txt = Lident "x"; loc} in
+                  Some(AD.pexp_apply ~loc (AD.pexp_ident ~loc {txt = Longident.parse (type_name ^ "_from_" ^ type_name_novers); loc}) [(Nolabel, pe)])
+                else 
+                  if exists_constr 
+                  then Some(AD.pexp_ident ~loc {txt = Lident "x"; loc})
+                  else None
+              in
+              (AD.ppat_variant ~loc tag_name (if exists_constr then Some(AD.ppat_var ~loc {txt = "x"; loc}) else None),
+                Some (AD.pexp_variant ~loc tag_name pe))
           in
-          let attr = AD.attribute ~loc ~name:{txt = vers_set; loc} ~payload:(PPat (p, Some e)) in
+          let attr = AD.attribute ~loc ~name:{txt = vers_set; loc} ~payload:(PPat (p, e)) in
           {(rf) with prf_attributes = attr :: rf.prf_attributes}          
         ) rfx 
       in 
@@ -901,13 +934,14 @@ let ct_to_novers_rec type_name name ct =
       | Ptyp_constr (l, []) -> 
         let t_name = Longident.name l.txt in
         if List.mem t_name _simple_types
-        then failwith (Printf.sprintf "only simple user types are used for [@%s] (type: %s, %s, %s)" from_novers type_name name t_name)
+        then Ptyp_constr (l, [])
         else Ptyp_constr (longident_loc_to_novers l, [])
       | Ptyp_constr (l, ctx) ->    
         let t_name = Longident.name l.txt in
         if List.mem t_name _simple_types
         then Ptyp_constr (l, List.map parse ctx)
         else Ptyp_constr (longident_loc_to_novers l, List.map parse ctx)     
+      | Ptyp_tuple ctx -> Ptyp_tuple (List.map parse ctx)
       | _ ->
         let () = Pprintast.core_type Format.str_formatter ct in
         let s = Format.flush_str_formatter () in
@@ -956,8 +990,9 @@ let gen_novers ~loc type_name rf td attrs =
                 else                  
                   (match ctx with
                   | [ct] -> 
-                    let () = Printf.printf "%s\n"  cd.pcd_name.txt in
-                    Pcstr_tuple [ct_to_novers type_name cd.pcd_name.txt ct |> fst]
+                    if exists_payload_attr from_novers cd.pcd_attributes
+                    then Pcstr_tuple [ct_to_novers_rec type_name cd.pcd_name.txt ct] 
+                    else Pcstr_tuple [ct_to_novers type_name cd.pcd_name.txt ct |> fst]
                   | ctx -> 
                     failwith (Printf.sprintf "too many types for [@%s] (type: %s, var: %s, constructor: %s)" 
                       from_novers type_name cd.pcd_name.txt (string_of_core_type_list ctx))))
@@ -980,8 +1015,12 @@ let gen_novers ~loc type_name rf td attrs =
                   failwith (Printf.sprintf "empty constructor for [@%s] (type: %s, pvar: %s)" 
                     from_novers type_name l.txt)
                 | Rtag (l, b, [ct]) -> 
-                  let (ct, novers_name) = ct_to_novers type_name l.txt ct in
-                  (Rtag (l, b, [ct]), novers_name)
+                  if exists_payload_attr from_novers rf.prf_attributes
+                  then 
+                    (Rtag (l, b, [ct_to_novers_rec type_name l.txt ct]), "")
+                  else  
+                    let (ct, novers_name) = ct_to_novers type_name l.txt ct in
+                    (Rtag (l, b, [ct]), novers_name)
                 | Rtag (l, _b, ctx) -> 
                   failwith (Printf.sprintf "wrong type for [@%s] (type: %s, pvar: %s, constructor: %s)" 
                     from_novers type_name l.txt (string_of_core_type_list ctx))
