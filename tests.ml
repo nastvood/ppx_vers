@@ -152,11 +152,22 @@ float list [@@migrate (List.map float p)]
 | `Nothing 
 ]*)
 
-let a =  
-  let v = 1 in 
-  match v with 
-  | 1 -> ()
-  | 1 -> assert false
-  | _ -> ()
+type%vers[@novers] kind = string [@@deriving (sexp,bin_io)]
 
-
+type%vers[@novers] cost = 
+  (kind_novers * int) [@@deriving (sexp,bin_read,bin_write)]
+and cost = 
+  (kind * int) [@@migrate (kind_from_kind_novers (fst p), snd p)]
+  
+type%vers[@novers] arena_competition_reward =
+  {
+    position : int;
+    new_league : int option;
+    reward : cost_novers list;
+  } [@@deriving (sexp,bin_read,bin_write)]
+and arena_competition_reward =
+  {
+    position : int;
+    new_league : int option;
+    reward : cost list [@migrate (List.map cost_from_cost_novers p.Prev.reward)]
+  }

@@ -292,7 +292,7 @@ let get_upgrade_fun ~loc type_name td =
                 (AD.ppat_variant ~loc tag_name (if exists_constr then Some(AD.ppat_var ~loc {txt = "x"; loc}) else None),
                 AD.pexp_variant ~loc tag_name (if exists_constr then Some(AD.pexp_ident ~loc {txt = Lident "x"; loc}) else None))
             in  
-            AD.case lhs None rhs
+            AD.case ~lhs ~guard:None ~rhs
           ) rfx
         in
         let m = AD.pexp_match ~loc [%expr p] cases in
@@ -322,7 +322,7 @@ let get_upgrade_fun ~loc type_name td =
             AD.pexp_construct ~loc {txt = Lident tag_name; loc} (if exists_constr then Some(AD.pexp_ident ~loc {txt = Lident "x"; loc}) else None))
           )
         in  
-        AD.case lhs None rhs
+        AD.case ~lhs ~guard:None ~rhs
       ) parsed_cdx
     in     
     let m = AD.pexp_match ~loc [%expr p] cases in
@@ -437,7 +437,7 @@ let gen_last_read_fun ~loc type_name cur_ver first_ver =
   let fail_case = 
     let e_file = AD.estring ~loc loc.loc_start.Stdlib.Lexing.pos_fname in
     let e_type = AD.estring ~loc type_name in
-    AD.case [%pat? v] None [%expr failwith (Printf.sprintf "Unknown VERS %s.%s:%d" [%e e_file] [%e e_type] v)] 
+    AD.case ~lhs:[%pat? v]  ~guard:None ~rhs:[%expr failwith (Printf.sprintf "Unknown VERS %s.%s:%d" [%e e_file] [%e e_type] v)] 
   in
   let rec loop cases ver ex =
     if ver < first_ver
@@ -462,7 +462,7 @@ let gen_last_read_fun ~loc type_name cur_ver first_ver =
         in
         eloop ver (List.tl ex) e_first
       in  
-      let case = AD.case [%pat? [%p p]] None e_res in
+      let case = AD.case ~lhs:[%pat? [%p p]] ~guard:None ~rhs:e_res in
       loop (case :: cases) (ver - 1) ("upgrade" :: ex)
   in
   let cases = fail_case :: loop [] cur_ver [f_name] |> List.rev in
@@ -934,7 +934,9 @@ let gen_novers ~loc type_name rf td attrs =
         ({(td_novers) with ptype_manifest = Some {(ct) with ptyp_desc = Ptyp_variant (rfx, clf, lx_opt)}}, novers_names)      
       | _ -> assert false)
     | Ptype_abstract -> 
-      failwith (Printf.sprintf "wron_type for [@%s] (%s)" from_novers type_name)
+      if exists_attr from_novers td.ptype_attributes
+      then failwith (Printf.sprintf "wron_type for [@%s] (%s)" from_novers type_name)
+      else (td_novers, [])
     | _ -> (td_novers, [])
   in  
   let novers_type = AD.pstr_type ~loc rf [td_novers] in
@@ -1001,7 +1003,7 @@ let impl sx =
           let td = AD.type_declaration ~loc ~name:{txt = type_name; loc}
             ~params:[] ~cstrs:[] ~kind ~private_:Public ~manifest:(Some ct)
           in
-          let td = {(td) with ptype_attributes = SD.get_attrs false type_name} in
+          let td = {(td) with ptype_attributes = SD.get_attrs ~is_inner:false type_name} in
           let app_funcs = gen_app_funcs ~loc mod_name pe in                            
           let novers_upg_fun =
             match !novers_upg with
