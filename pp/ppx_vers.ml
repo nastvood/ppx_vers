@@ -870,13 +870,17 @@ let gen_novers_second_type ~loc type_name novers_names td =
         ) rfx 
       in 
       {(td) with ptype_manifest = Some {(ct) with ptyp_desc = Ptyp_variant (rfx, clf, lx_opt)}}      
-    | Some ct -> 
-      let td = AD.type_declaration ~loc ~name:{txt = type_name; loc} ~params:[] ~cstrs:[] ~kind:Ptype_abstract ~private_:Public 
-        ~manifest:(Some ct)     
+    | Some _ct -> 
+      let payload =  
+        if exists_attr from_novers td.ptype_attributes && exists_payload_attr from_novers td.ptype_attributes
+        then 
+          (match attr_by_name from_novers td.ptype_attributes with
+          | Some a -> a.attr_payload
+          | None -> assert false)
+        else PStr [AD.pstr_eval ~loc [%expr p] []]
       in
-      let s = AD.pstr_eval ~loc [%expr p] [] in
-      let attr = AD.attribute ~loc ~name:{txt = vers_set; loc} ~payload:(PStr [s]) in
-      {(td) with ptype_attributes = attr :: td.ptype_attributes}     
+      let attr = AD.attribute ~loc ~name:{txt = vers_set; loc} ~payload in
+      {(td) with ptype_attributes = attr :: (remove_attr vers_novers (remove_attr from_novers td.ptype_attributes))}     
     | _ -> assert false)
   | _ -> assert false
 
@@ -886,7 +890,7 @@ let string_of_core_type_list ctx =
     Format.flush_str_formatter ()
   ) ctx |> String.concat " "   
 
-let _simple_types = ["int"; "float"; "bool"; "string"; "char"; "option"; "array"; "list"]  
+let _simple_types = ["int"; "float"; "bool"; "string"; "char"; "option"; "array"; "list"; "Time.t"]  
 
 let ct_to_novers type_name name ct =
   let longident_to_novers l =
@@ -921,16 +925,19 @@ let ct_to_novers type_name name ct =
 
 let ct_to_novers_rec type_name name ct =
   let longident_loc_to_novers l =
-    let longident_to_novers l =
-      match l with
-      | Lident type_name -> 
-        Lident (if List.mem type_name _simple_types then type_name else type_name ^ "_" ^ vers_novers)
-      | Ldot (l, type_name) -> 
-        Ldot (l, if List.mem type_name _simple_types then type_name else type_name ^ "_" ^ vers_novers)
-      | Lapply _ -> assert false
-    in   
-    let txt = longident_to_novers l.txt in
-    {(l) with txt}      
+    if List.mem (Longident.name l.txt) _simple_types
+    then l
+    else  
+      let longident_to_novers l =
+        match l with
+        | Lident type_name -> 
+          Lident (if List.mem type_name _simple_types then type_name else type_name ^ "_" ^ vers_novers)
+        | Ldot (l, type_name) -> 
+          Ldot (l, if List.mem type_name _simple_types then type_name else type_name ^ "_" ^ vers_novers)
+        | Lapply _ -> assert false
+      in   
+      let txt = longident_to_novers l.txt in
+      {(l) with txt}      
   in   
   let rec parse ct =
     let ptyp_desc =
@@ -1042,7 +1049,13 @@ let gen_novers ~loc type_name rf td attrs =
       | _ -> assert false)
     | Ptype_abstract -> 
       if exists_attr from_novers td.ptype_attributes
-      then failwith (Printf.sprintf "wron_type for [@%s] (%s)" from_novers type_name)
+      then
+        if exists_payload_attr from_novers td.ptype_attributes
+        then 
+          match td_novers.ptype_manifest with
+          | Some ct -> ({(td_novers) with ptype_manifest = Some (ct_to_novers_rec td_novers.ptype_name.txt "" ct)}, [])
+          | None -> assert false
+        else failwith (Printf.sprintf "wron_type for [@%s] (%s)" from_novers type_name)
       else (td_novers, [])
     | _ -> (td_novers, [])
   in  
