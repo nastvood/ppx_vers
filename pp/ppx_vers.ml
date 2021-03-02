@@ -39,14 +39,15 @@ module SD = struct (* str_descr*)
       first_ver: int;
       cnt: int ref;
       prev_td: type_declaration;
+      mod_name: string;
     }
   
-  let h_strs: (string, str_descr) Hashtbl.t = Hashtbl.create 0
+  let h_strs: ((string * string), str_descr) Hashtbl.t = Hashtbl.create 0
   let h_attrs: (string, str_attrs) Hashtbl.t = Hashtbl.create 0 
   
-  let __init type_name prev_td =
+  let __init mod_name type_name prev_td =
     try    
-      let _ = Hashtbl.find h_strs type_name in
+      let _ = Hashtbl.find h_strs (mod_name, type_name) in
       assert false
     with | Not_found -> 
       let cnt =
@@ -60,27 +61,27 @@ module SD = struct (* str_descr*)
           | _ -> assert false)  
         with Not_found -> 0    
       in  
-      { type_name; cnt = ref cnt; first_ver = cnt; prev_td }   
+      {mod_name; type_name; cnt = ref cnt; first_ver = cnt; prev_td}   
 
-  let init type_name last_td =
+  let init mod_name type_name last_td =
     try    
-      let descr = Hashtbl.find h_strs type_name in
+      let descr = Hashtbl.find h_strs (mod_name, type_name) in
       (!(descr.cnt), descr.first_ver)
     with | Not_found -> 
-      let descr = __init type_name last_td in 
-      Hashtbl.add h_strs type_name descr;
+      let descr = __init mod_name type_name last_td in 
+      Hashtbl.add h_strs (mod_name, type_name) descr;
       (!(descr.cnt), descr.first_ver)  
 
-  let get type_name =
-    Hashtbl.find h_strs type_name 
+  let get ~parent_mod_name ~type_name =
+    Hashtbl.find h_strs (parent_mod_name, type_name)
 
-  let exists = Hashtbl.mem h_strs
+  let exists ~parent_mod_name ~type_name = Hashtbl.mem h_strs (parent_mod_name, type_name)
 
-  let incr type_name prev_td =
+  let incr ~parent_mod_name ~type_name prev_td =
     try    
-      let descr = Hashtbl.find h_strs type_name in
+      let descr = Hashtbl.find h_strs (parent_mod_name, type_name) in
       let descr = {(descr) with prev_td} in
-      Hashtbl.replace h_strs type_name descr;
+      Hashtbl.replace h_strs (parent_mod_name, type_name) descr;
       incr descr.cnt 
     with | Not_found -> assert false      
 
@@ -191,8 +192,8 @@ let mod_name_by_cnt name cnt =
 let data_by_mod_name mod_name =
   try
     let (ver, name) = Scanf.sscanf mod_name "V%d%s" (fun v t -> (v, t))  in
-    Some (ver, name)  
-  with | _ -> None    
+    Some (ver, name)
+  with | _ -> None
 
 let remove_attr name attrs = 
   List.fold_right (fun a attrs ->
@@ -275,7 +276,7 @@ let vers_set_payload_by_constructor_declaration cdx =
     | _ -> acc
   ) [] cdx
 
-let get_upgrade_fun ~loc type_name td =
+let get_upgrade_fun ~loc ~parent_mod_name ~type_name td =
   match td.ptype_kind with
   | Ptype_record lds ->
     let lexps =
@@ -323,7 +324,7 @@ let get_upgrade_fun ~loc type_name td =
     let pls = vers_set_payload_by_constructor_declaration cdx in
     let parsed_cdx = 
       if pls = [] 
-      then match (SD.get type_name).prev_td.ptype_kind with Ptype_variant cdx -> cdx | _ -> assert false
+      then match (SD.get ~parent_mod_name ~type_name).prev_td.ptype_kind with Ptype_variant cdx -> cdx | _ -> assert false
       else cdx 
     in
     let cases =
@@ -366,6 +367,12 @@ let clean_attrs td =
       | None -> td)
     | Ptype_open -> td  
 
+let get_parent_module_name ctxt =
+  match Code_path.submodule_path (Expansion_context.Extension.code_path ctxt) with
+  | [] -> ""
+  | [x] -> x
+  | mx -> BatList.last mx        
+
 let expand_ver ~ctxt payload = 
   let loc = Expansion_context.Extension.extension_point_loc ctxt in
   match payload with
@@ -377,22 +384,22 @@ let expand_ver ~ctxt payload =
         let hd_td = List.hd td in
         let td_clean = clean_attrs hd_td in
         let type_name = hd_td.ptype_name.txt in
-        let (cnt, first_ver) = SD.init type_name hd_td in
+        let parent_mod_name = get_parent_module_name ctxt in
+        let (cnt, first_ver) = SD.init parent_mod_name type_name hd_td in
         let mod_name = mod_name_by_cnt type_name cnt in
-        (*let sts = [first_struct] in*)
         let sts =
           if cnt > first_ver
           then 
             let prev_mod_name = mod_name_by_cnt type_name (cnt - 1) in
             let lm = AD.pmod_ident ~loc {txt = Lident prev_mod_name; loc} in
-            get_upgrade_fun ~loc type_name hd_td ::
+            get_upgrade_fun ~loc ~parent_mod_name ~type_name hd_td ::
             [%stri module Prev = [%m lm] ] :: 
-            (*sts*) [{(first_struct) with pstr_desc = Pstr_type (rf, [td_clean])}] |> List.rev
-          else (*sts*)[{(first_struct) with pstr_desc = Pstr_type (rf, [td_clean])}]
+            [{(first_struct) with pstr_desc = Pstr_type (rf, [td_clean])}] |> List.rev
+          else [{(first_struct) with pstr_desc = Pstr_type (rf, [td_clean])}]
         in
         let m = AD.pmod_structure ~loc sts in
         let mb = AD.module_binding ~loc ~name:{txt = Some mod_name; loc} ~expr:m in
-        let () = SD.incr type_name hd_td in
+        let () = SD.incr ~parent_mod_name ~type_name hd_td in
         AD.pstr_module ~loc mb
       | Pstr_type _ -> failwith "Only one typedef in type definition"  
       | _ -> assert false
@@ -469,7 +476,7 @@ let gen_last_size_fun ~loc type_name =
   let e_f_name = AD.pexp_ident ~loc {txt = Lident f_name; loc} in
   [%stri let [%p f_name_l] = fun t -> [%e e_f_name] t + 1 ] 
 
-let gen_last_read_fun ~loc type_name cur_ver first_ver =    
+let gen_last_read_fun ~loc ~type_name cur_ver first_ver =    
   let f_name = "bin_read_" ^ type_name in
   let f_name_l = AD.pvar ~loc f_name in
   let fail_case = 
@@ -673,7 +680,7 @@ let patch_bin_io_incl ~loc incl type_name type_kind pm isx s =
   let incl = {(incl) with pincl_mod = pm} in
   {(s) with pstr_desc = Pstr_include incl}
 
-let patch_bin_io_incl_last ~loc ver first_ver incl type_name type_kind pm isx s =  
+let patch_bin_io_incl_last ~loc ver first_ver incl  ~type_name type_kind pm isx s =  
   let isx =
     List.fold_right (fun s isx ->
       (match s.pstr_desc with
@@ -683,7 +690,7 @@ let patch_bin_io_incl_last ~loc ver first_ver incl type_name type_kind pm isx s 
         | Ppat_var l when l.txt = "bin_writer_" ^ type_name -> 
           gen_last_write_fun ~loc type_name ver :: s :: isx
         | Ppat_var l when l.txt = "bin_reader_" ^ type_name -> 
-          gen_last_read_fun ~loc type_name ver first_ver :: s :: isx
+          gen_last_read_fun ~loc ~type_name ver first_ver :: s :: isx
         | Ppat_var l when l.txt = "bin_size_" ^ type_name -> 
           s :: gen_last_size_fun ~loc type_name  :: isx              
         | Ppat_constraint (p, _) -> 
@@ -702,7 +709,7 @@ let patch_bin_io_incl_last ~loc ver first_ver incl type_name type_kind pm isx s 
   let incl = {(incl) with pincl_mod = pm} in
   {(s) with pstr_desc = Pstr_include incl}
 
-let patch_module_expr ~loc type_name type_kind pe =
+let patch_module_expr ~loc ~type_name type_kind pe =
   match pe.pmod_desc with
   | Pmod_structure sx -> 
     let sx =
@@ -719,7 +726,7 @@ let patch_module_expr ~loc type_name type_kind pe =
     {(pe) with pmod_desc = Pmod_structure sx}
   | _ -> pe  
 
-let patch_module_expr_last ~loc type_name ver first_ver type_kind pe =
+let patch_module_expr_last ~loc ~type_name ver first_ver type_kind pe =
   match pe.pmod_desc with
   | Pmod_structure sx -> 
     let sx =
@@ -728,7 +735,7 @@ let patch_module_expr_last ~loc type_name ver first_ver type_kind pe =
         | Pstr_include i -> 
           let pm = i.pincl_mod in
           (match pm.pmod_desc with
-          | Pmod_structure isx -> patch_bin_io_incl_last ~loc ver first_ver i type_name type_kind pm isx s :: sx
+          | Pmod_structure isx -> patch_bin_io_incl_last ~loc ver first_ver i ~type_name type_kind pm isx s :: sx
           | _ -> s :: sx)
         | _ -> s :: sx
       ) sx []
@@ -1112,21 +1119,21 @@ let rec preprocess_impl sx =
     | _ -> s :: strs
   ) sx []
 
-let rec impl sx =
+let rec impl parent_mod_name sx =
   let novers_upg = ref None in
   List.fold_left (fun strs s ->
     let loc = s.pstr_loc in
     match s.pstr_desc with
     | Pstr_module ({pmb_name = {txt = Some(mod_name); _}; pmb_expr = pe; _} as pm) ->      
       (match data_by_mod_name mod_name with
-      | Some (ver, type_name) when SD.exists type_name ->
+      | Some (ver, type_name) when SD.exists ~parent_mod_name ~type_name ->
         let pe = include_to_end pe in
         let kind = type_kind_by_mod_expr pe in
-        let descr = SD.get type_name in
+        let descr = SD.get ~parent_mod_name ~type_name in
         let cur_ver = !(descr.cnt) - 1 in
         if cur_ver = ver
         then 
-          let pe = patch_module_expr_last ~loc type_name ver descr.first_ver kind pe in
+          let pe = patch_module_expr_last ~loc ~type_name ver descr.first_ver kind pe in
           let s = {(s) with pstr_desc = Pstr_module {(pm) with pmb_expr = pe}} in
           let ct = AD.ptyp_constr ~loc {txt = Longident.parse (mod_name ^ "." ^ type_name); loc} [] in
           let td = AD.type_declaration ~loc ~name:{txt = type_name; loc}
@@ -1144,12 +1151,12 @@ let rec impl sx =
           (Ast_builder.Default.pstr_type ~loc Recursive [td] :: 
           (List.append app_funcs (s :: strs)))
         else 
-          let pe = patch_module_expr ~loc type_name kind pe in
+          let pe = patch_module_expr ~loc ~type_name kind pe in
           {(s) with pstr_desc = Pstr_module {(pm) with pmb_expr = pe}} :: strs
       | _ -> 
         (match pe.pmod_desc with
         | Pmod_structure sub_sx -> 
-          let pm = {(pm) with pmb_expr = {(pe) with pmod_desc = Pmod_structure (impl sub_sx)} } in
+          let pm = {(pm) with pmb_expr = {(pe) with pmod_desc = Pmod_structure (impl mod_name sub_sx)} } in
           let s = {(s) with pstr_desc = Pstr_module pm} in
           s :: strs
         | _ ->   s :: strs))
@@ -1159,12 +1166,14 @@ let rec impl sx =
       then 
         let type_name = BatString.left h_td.ptype_name.txt (BatString.rfind h_td.ptype_name.txt "_") in
         let type_name_novers = type_name ^ "_" ^ vers_novers in
-        let descr = SD.get type_name in
+        let descr = SD.get ~parent_mod_name ~type_name in
         let rec expr_upgrade cnt e =
           if cnt = 0
           then e
           else  
-            let pe = AD.pexp_ident ~loc {txt = Longident.parse (Printf.sprintf "V%d_%s.upgrade" (!(descr.cnt) - cnt) type_name); loc} in
+            let ident_name = mod_name_by_cnt type_name (!(descr.cnt) - cnt) in
+            (*let pe = AD.pexp_ident ~loc {txt = Longident.parse (Printf.sprintf "V%d_%s.upgrade" (!(descr.cnt) - cnt) type_name); loc} in*)
+            let pe = AD.pexp_ident ~loc {txt = Longident.parse (ident_name ^ ".upgrade"); loc} in
             let pfe = AD.pexp_apply ~loc pe [(Nolabel, e)] in
             expr_upgrade (cnt - 1) pfe
         in
@@ -1206,5 +1215,5 @@ let () =
   Driver.register_transformation
     ~preprocess_impl
     ~rules:[rule_vers]
-    ~impl
+    ~impl:(impl "")
     vers
