@@ -39,15 +39,15 @@ module SD = struct (* str_descr*)
       first_ver: int;
       cnt: int ref;
       prev_td: type_declaration;
-      mod_name: string;
+      parent_mod_name: string;
     }
   
   let h_strs: ((string * string), str_descr) Hashtbl.t = Hashtbl.create 0
   let h_attrs: (string, str_attrs) Hashtbl.t = Hashtbl.create 0 
   
-  let __init mod_name type_name prev_td =
+  let __init ~parent_mod_name ~type_name prev_td =
     try    
-      let _ = Hashtbl.find h_strs (mod_name, type_name) in
+      let _ = Hashtbl.find h_strs (parent_mod_name, type_name) in
       assert false
     with | Not_found -> 
       let cnt =
@@ -61,15 +61,15 @@ module SD = struct (* str_descr*)
           | _ -> assert false)  
         with Not_found -> 0    
       in  
-      {mod_name; type_name; cnt = ref cnt; first_ver = cnt; prev_td}   
+      {parent_mod_name; type_name; cnt = ref cnt; first_ver = cnt; prev_td}   
 
-  let init mod_name type_name last_td =
+  let init ~parent_mod_name ~type_name last_td =
     try    
-      let descr = Hashtbl.find h_strs (mod_name, type_name) in
+      let descr = Hashtbl.find h_strs (parent_mod_name, type_name) in
       (!(descr.cnt), descr.first_ver)
     with | Not_found -> 
-      let descr = __init mod_name type_name last_td in 
-      Hashtbl.add h_strs (mod_name, type_name) descr;
+      let descr = __init ~parent_mod_name ~type_name last_td in 
+      Hashtbl.add h_strs (parent_mod_name, type_name) descr;
       (!(descr.cnt), descr.first_ver)  
 
   let get ~parent_mod_name ~type_name =
@@ -385,7 +385,7 @@ let expand_ver ~ctxt payload =
         let td_clean = clean_attrs hd_td in
         let type_name = hd_td.ptype_name.txt in
         let parent_mod_name = get_parent_module_name ctxt in
-        let (cnt, first_ver) = SD.init parent_mod_name type_name hd_td in
+        let (cnt, first_ver) = SD.init ~parent_mod_name ~type_name hd_td in
         let mod_name = mod_name_by_cnt type_name cnt in
         let sts =
           if cnt > first_ver
