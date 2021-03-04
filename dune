@@ -2,8 +2,8 @@
  (names tests)
  (modes byte native)
  (modules tests)
- (libraries batteries bin_prot sexplib yojson)
- (preprocess (pps ppx_bin_prot ppx_deriving_yojson ppx_sexp_conv ppx_vers))
+ (libraries batteries)
+ (preprocess (pps ppx_vers))
  )
 
-(env (dev (flags (:standard -w -32 -w -49 -w -6 -w -33 -w -11))))
+;(env (dev (flags (:standard -w -32 -w -49 -w -6 -w -33 -w -11))))
