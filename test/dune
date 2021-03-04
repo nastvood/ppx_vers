@@ -1,0 +1,38 @@
+(executables
+  (names test_run)
+  (modes byte native)
+  (modules test_run)
+  (libraries unix pcre)
+)
+
+(library 
+ (name abstract)
+ (preprocess (pps ppx_vers))
+ (modules abstract)
+)
+
+(library 
+ (name variant)
+ (preprocess (pps ppx_vers))
+ (modules variant)
+)
+
+(library 
+ (name record_vers)
+ (preprocess (pps ppx_vers))
+ (modules record_vers)
+)
+
+(library 
+ (name record_novers)
+ (preprocess (pps ppx_vers))
+ (modules record_novers)
+)
+
+(library 
+ (name pvariant)
+ (preprocess (pps ppx_vers))
+ (modules pvariant)
+)
+
+;(env (dev (flags (:standard -w -14))))
