@@ -1,9 +1,11 @@
 let tests = [
-  "abstract";
-  "variant";
-  "record_vers";
-  "record_novers";
-  "pvariant";
+  ("abstract", []);
+  ("variant", []);
+  ("record_vers", []);
+  ("record_novers", []);
+  ("pvariant", []);
+  ("include_type", []);
+  ("with_bin_io", ["bin_prot"]);
 ]
 
 let run cmd = 
@@ -27,11 +29,23 @@ let get_diff s1 s2 =
   Stdlib.close_out cout2;
   run (Printf.sprintf "diff -u %s %s" tmp_s1 tmp_s2)
 
+let ocamlfind_query libs =
+  if libs = []
+  then ""
+  else
+    let str_libs =
+      List.map (fun l ->
+        let res = run (Printf.sprintf "ocamlfind query %s" l) in
+        "-I " ^ res
+      ) libs
+    in
+    Printf.sprintf "%s -c -impl" (String.concat " " str_libs)
+
 let () = 
   let rex = Pcre.regexp "\\[@@@ocaml.ppx.context[\\d\\D]*}]\n" in 
-  List.iter (fun s ->
+  List.iter (fun (s, libs) ->
     let _ = run (Printf.sprintf "dune build test/%s.cma" s) in 
-    let dsource_cmd = Printf.sprintf "ocamlc -dsource _build/default/test/%s.pp.ml" s in
+    let dsource_cmd = Printf.sprintf "ocamlc -dsource %s _build/default/test/%s.pp.ml" (ocamlfind_query libs) s in
     let res = run (dsource_cmd ^ " 2>&1") in
     let str = Pcre.replace ~rex res in
     let str_exp = run (Printf.sprintf "cat test/expect/%s.ml" s) in

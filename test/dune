@@ -35,4 +35,16 @@
  (modules pvariant)
 )
 
+(library 
+ (name with_bin_io)
+ (preprocess (pps ppx_vers ppx_bin_prot))
+ (modules with_bin_io)
+)
+
+(library 
+ (name include_type)
+ (preprocess (pps ppx_vers))
+ (modules include_type)
+)
+
 ;(env (dev (flags (:standard -w -14))))
