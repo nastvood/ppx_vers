@@ -29,6 +29,8 @@ let allowed_inner_attrs = [
   (vers_set, "")
 ] 
 
+let arg_novers_types = ref []
+
 module SD = struct (* str_descr*)
 
   type str_attrs = ((string * string) * attribute) list
@@ -195,9 +197,9 @@ let data_by_mod_name mod_name =
     Some (ver, name)
   with | _ -> None
 
-let remove_attr name attrs = 
+let remove_attrs names attrs = 
   List.fold_right (fun a attrs ->
-    if a.attr_name.txt = name
+    if List.mem a.attr_name.txt names
     then attrs
     else a :: attrs  
   ) attrs []
@@ -347,25 +349,25 @@ let get_upgrade_fun ~loc ~parent_mod_name ~type_name td =
   | Ptype_open -> assert false
 
 let clean_attrs td =
-  let clean attrs = remove_attr from_novers (remove_attr vers_set attrs) in
-    match td.ptype_kind with
-    | Ptype_record ldx ->
-      let ldx = List.map (fun ld -> {(ld) with pld_attributes = clean ld.pld_attributes}) ldx in
-      {(td) with ptype_kind = Ptype_record ldx}
-    | Ptype_variant cdx -> 
-      let cdx = List.map (fun cd -> {(cd) with pcd_attributes = clean cd.pcd_attributes}) cdx in
-      {(td) with ptype_kind = Ptype_variant cdx}
-    | Ptype_abstract ->  
-      (match td.ptype_manifest with
-      | Some ({ptyp_desc = Ptyp_variant (rfx, clf, lx_opt); _} as ct) -> 
-        let rfx = List.map (fun rf -> {(rf) with prf_attributes = clean rf.prf_attributes}) rfx in
-        let ct = {(ct) with ptyp_desc = Ptyp_variant (rfx, clf, lx_opt)} in
-        {(td) with ptype_manifest = Some ct}
-      | Some ct -> 
-        let ct = {(ct) with ptyp_attributes = clean ct.ptyp_attributes} in
-        {(td) with ptype_manifest = Some ct}
-      | None -> td)
-    | Ptype_open -> td  
+  let clean attrs = remove_attrs [from_novers; vers_set; vers_novers] attrs in
+  match td.ptype_kind with
+  | Ptype_record ldx ->
+    let ldx = List.map (fun ld -> {(ld) with pld_attributes = clean ld.pld_attributes}) ldx in
+    {(td) with ptype_kind = Ptype_record ldx}
+  | Ptype_variant cdx -> 
+    let cdx = List.map (fun cd -> {(cd) with pcd_attributes = clean cd.pcd_attributes}) cdx in
+    {(td) with ptype_kind = Ptype_variant cdx}
+  | Ptype_abstract ->  
+    (match td.ptype_manifest with
+    | Some ({ptyp_desc = Ptyp_variant (rfx, clf, lx_opt); _} as ct) -> 
+      let rfx = List.map (fun rf -> {(rf) with prf_attributes = clean rf.prf_attributes}) rfx in
+      let ct = {(ct) with ptyp_desc = Ptyp_variant (rfx, clf, lx_opt)} in
+      {(td) with ptype_manifest = Some ct}
+    | Some ct -> 
+      let ct = {(ct) with ptyp_attributes = clean ct.ptyp_attributes} in
+      {(td) with ptype_manifest = Some ct; ptype_attributes = clean td.ptype_attributes}
+    | None -> td)
+  | Ptype_open -> td  
 
 let get_parent_module_name ctxt =
   match Code_path.submodule_path (Expansion_context.Extension.code_path ctxt) with
@@ -753,7 +755,7 @@ let mkattr_bin_io ~loc =
   let payload = PStr [AD.pstr_eval ~loc id []] in
   AD.attribute ~loc ~name:{txt = "deriving"; loc } ~payload
 
-let gen_novers_first_type ~loc type_name td =
+let gen_novers_fst_type ~loc type_name td =
   match td.ptype_kind with
   | Ptype_variant _cdx ->
     let ct = AD.ptyp_constr ~loc {txt = Longident.parse (type_name ^ "_" ^ vers_novers); loc} [] in
@@ -777,7 +779,7 @@ let gen_novers_first_type ~loc type_name td =
     | _ -> assert false)
   | _ -> assert false
 
-let gen_novers_second_type ~loc type_name novers_names td =
+let gen_novers_snd_type ~loc type_name novers_names td =
   match td.ptype_kind with
   | Ptype_variant cdx ->
     let cdx =
@@ -887,7 +889,7 @@ let gen_novers_second_type ~loc type_name novers_names td =
         else PStr [AD.pstr_eval ~loc [%expr p] []]
       in
       let attr = AD.attribute ~loc ~name:{txt = vers_set; loc} ~payload in
-      {(td) with ptype_attributes = attr :: (remove_attr vers_novers (remove_attr from_novers td.ptype_attributes))}     
+      {(td) with ptype_attributes = attr :: (remove_attrs [vers_novers; from_novers] td.ptype_attributes)}     
     | _ -> assert false)
   | _ -> assert false
 
@@ -897,16 +899,19 @@ let string_of_core_type_list ctx =
     Format.flush_str_formatter ()
   ) ctx |> String.concat " "   
 
-let _simple_types = ["int"; "float"; "bool"; "string"; "char"; "option"; "array"; "list"; "Time.t"]  
+let _simple_notypes_types = ["int"; "float"; "bool"; "string"; "char"; "option"; "array"; "list"; "Time.t"]  
+
+let get_notypes () = 
+  List.append _simple_notypes_types !arg_novers_types
 
 let ct_to_novers type_name name ct =
   let longident_to_novers l =
     let txt =
       match l.txt with
       | Lident type_name ->
-        Lident (if List.mem type_name _simple_types then type_name else type_name ^ "_" ^ vers_novers)
+        Lident (if List.mem type_name (get_notypes()) then type_name else type_name ^ "_" ^ vers_novers)
       | Ldot (l, type_name) ->
-        Ldot (l, if List.mem type_name _simple_types then type_name else type_name ^ "_" ^ vers_novers)
+        Ldot (l, if List.mem type_name (get_notypes()) then type_name else type_name ^ "_" ^ vers_novers)
       | Lapply _ -> assert false
     in 
     {(l) with txt}      
@@ -916,7 +921,7 @@ let ct_to_novers type_name name ct =
       match ct.ptyp_desc with
       | Ptyp_constr (l, []) -> 
         let t_name = Longident.name l.txt in
-        if List.mem t_name _simple_types
+        if List.mem t_name (get_notypes ())
         then failwith (Printf.sprintf "only simple user types are used for [@%s] (type: %s, %s, %s)" from_novers type_name name t_name)
         else (Ptyp_constr (longident_to_novers l, []), Longident.name l.txt)
       | Ptyp_constr (l, ctx) ->         
@@ -932,15 +937,15 @@ let ct_to_novers type_name name ct =
 
 let ct_to_novers_rec type_name name ct =
   let longident_loc_to_novers l =
-    if List.mem (Longident.name l.txt) _simple_types
+    if List.mem (Longident.name l.txt) (get_notypes())
     then l
     else  
       let longident_to_novers l =
         match l with
         | Lident type_name -> 
-          Lident (if List.mem type_name _simple_types then type_name else type_name ^ "_" ^ vers_novers)
+          Lident (if List.mem type_name (get_notypes()) then type_name else type_name ^ "_" ^ vers_novers)
         | Ldot (l, type_name) -> 
-          Ldot (l, if List.mem type_name _simple_types then type_name else type_name ^ "_" ^ vers_novers)
+          Ldot (l, if List.mem type_name (get_notypes()) then type_name else type_name ^ "_" ^ vers_novers)
         | Lapply _ -> assert false
       in   
       let txt = longident_to_novers l.txt in
@@ -951,12 +956,12 @@ let ct_to_novers_rec type_name name ct =
       match ct.ptyp_desc with
       | Ptyp_constr (l, []) -> 
         let t_name = Longident.name l.txt in
-        if List.mem t_name _simple_types
+        if List.mem t_name (get_notypes())
         then Ptyp_constr (l, [])
         else Ptyp_constr (longident_loc_to_novers l, [])
       | Ptyp_constr (l, ctx) ->    
         let t_name = Longident.name l.txt in
-        if List.mem t_name _simple_types
+        if List.mem t_name (get_notypes())
         then Ptyp_constr (l, List.map parse ctx)
         else Ptyp_constr (longident_loc_to_novers l, List.map parse ctx)     
       | Ptyp_tuple ctx -> Ptyp_tuple (List.map parse ctx)
@@ -981,15 +986,15 @@ let gen_novers ~loc type_name rf td attrs =
             if exists_payload_attr from_novers ld.pld_attributes 
             then  
               let pld_type = ct_to_novers_rec type_name ld.pld_name.txt ld.pld_type in
-              ({(ld) with pld_attributes = remove_attr from_novers ld.pld_attributes; pld_type}, "")
+              ({(ld) with pld_attributes = remove_attrs [from_novers] ld.pld_attributes; pld_type}, "")
             else              
               let (pld_type, novers_name) = ct_to_novers type_name ld.pld_name.txt ld.pld_type in
-              ({(ld) with pld_attributes = remove_attr from_novers ld.pld_attributes; pld_type}, novers_name)
+              ({(ld) with pld_attributes = remove_attrs [from_novers] ld.pld_attributes; pld_type}, novers_name)
           else (ld, "")   
         ) ldx 
       in
       let (ldx, pld_names) = BatList.split ldx in
-      ({(td_novers) with ptype_kind = Ptype_record ldx}, pld_names)
+      ({(td_novers) with ptype_kind = Ptype_record ldx; ptype_attributes = remove_attrs [vers_novers] td_novers.ptype_attributes}, pld_names)
     | Ptype_variant cdx ->      
       let cdx =
         List.map (fun cd ->
@@ -1016,11 +1021,11 @@ let gen_novers ~loc type_name rf td attrs =
                     failwith (Printf.sprintf "too many types for [@%s] (type: %s, var: %s, constructor: %s)" 
                       from_novers type_name cd.pcd_name.txt (string_of_core_type_list ctx))))
             in
-            {(cd) with pcd_attributes = remove_attr from_novers cd.pcd_attributes; pcd_args}
+            {(cd) with pcd_attributes = remove_attrs [from_novers] cd.pcd_attributes; pcd_args}
           else cd
         ) cdx
       in
-      ({(td_novers) with ptype_kind = Ptype_variant cdx}, [])
+      ({(td_novers) with ptype_kind = Ptype_variant cdx; ptype_attributes = remove_attrs [vers_novers] td_novers.ptype_attributes}, [])
     | Ptype_abstract when pvariant_by_type_declaration td_novers <> None ->  
       (match td.ptype_manifest with
       | Some ({ptyp_desc = Ptyp_variant (rfx, clf, lx_opt); _} as ct) ->
@@ -1048,11 +1053,15 @@ let gen_novers ~loc type_name rf td attrs =
                     from_novers type_name (string_of_core_type_list [ct]))                
               else (rf.prf_desc, "") 
             in
-            ({(rf) with prf_attributes = remove_attr from_novers rf.prf_attributes; prf_desc}, novers_name)
+            ({(rf) with prf_attributes = remove_attrs [from_novers] rf.prf_attributes; prf_desc}, novers_name)
           ) rfx 
         in 
         let (rfx, novers_names) = BatList.split rfx in
-        ({(td_novers) with ptype_manifest = Some {(ct) with ptyp_desc = Ptyp_variant (rfx, clf, lx_opt)}}, novers_names)      
+        let td_novers = {(td_novers) with 
+          ptype_manifest = Some {(ct) with ptyp_desc = Ptyp_variant (rfx, clf, lx_opt)};
+          ptype_attributes = remove_attrs [vers_novers] td_novers.ptype_attributes} 
+        in  
+        (td_novers, novers_names)      
       | _ -> assert false)
     | Ptype_abstract -> 
       if exists_attr from_novers td.ptype_attributes
@@ -1060,16 +1069,21 @@ let gen_novers ~loc type_name rf td attrs =
         if exists_payload_attr from_novers td.ptype_attributes
         then 
           match td_novers.ptype_manifest with
-          | Some ct -> ({(td_novers) with ptype_manifest = Some (ct_to_novers_rec td_novers.ptype_name.txt "" ct)}, [])
+          | Some ct -> 
+            let td_novers = {(td_novers) with 
+              ptype_manifest = Some (ct_to_novers_rec td_novers.ptype_name.txt "" ct); 
+              ptype_attributes = remove_attrs [vers_novers] td_novers.ptype_attributes} 
+            in
+            (td_novers, [])
           | None -> assert false
         else failwith (Printf.sprintf "wron_type for [@%s] (%s)" from_novers type_name)
-      else (td_novers, [])
+      else ({(td_novers) with ptype_attributes = remove_attrs [vers_novers] td_novers.ptype_attributes}, [])
     | _ -> (td_novers, [])
   in  
   let novers_type = AD.pstr_type ~loc rf [td_novers] in
-  let first_type = gen_novers_first_type ~loc type_name td in
-  let second_type = gen_novers_second_type ~loc type_name novers_names td in
-  ([novers_type], [first_type;  second_type])
+  let fst_type = gen_novers_fst_type ~loc type_name td in
+  let snd_type = gen_novers_snd_type ~loc type_name novers_names td in
+  ([novers_type], [fst_type;  snd_type])
 
 let rec preprocess_impl sx =
   List.fold_right (fun s strs ->
@@ -1091,13 +1105,12 @@ let rec preprocess_impl sx =
         | Pstr_type (rf, td) when td <> [] ->
           let hd_td = List.hd td in
           let type_name = hd_td.ptype_name.txt in
-          (*let () = Printf.printf "%s\n" (Pprintast.string_of_structure [sf]) in*)
           let last_i = List.length td - 1 in
           let all_attrs = List.append hd_td.ptype_attributes (List.nth td last_i).ptype_attributes  in
           let () = SD.add_attrs all_attrs type_name in
           let ins_attrs = SD.get_all_attrs ~excl:[(vers_set, "")] type_name in
           let is_novers = List.exists (fun a -> a.attr_name.txt = vers_novers) hd_td.ptype_attributes in
-          let (novers_type, first_type) = if is_novers then gen_novers ~loc type_name rf hd_td ins_attrs else ([], [] ) in
+          let (novers_type, fst_and_snd_types) = if is_novers then gen_novers ~loc type_name rf hd_td ins_attrs else ([], [] ) in
           let pex =
             List.map (fun t ->
               let ins_attrs =
@@ -1105,13 +1118,12 @@ let rec preprocess_impl sx =
                 | Some attr -> attr :: ins_attrs
                 | None -> ins_attrs
               in
-              let t = {(t) with ptype_attributes = ins_attrs} in
+              let t = {(t) with ptype_attributes = remove_attrs [vers_novers] ins_attrs} in
               let pstr_desc = Pstr_type (rf, [t]) in
               let payload = PStr [{(sf) with pstr_desc}] in
               let pstr_desc = Pstr_extension ((e, payload), ax) in
-              (*let () = Printf.printf "%s\n" (Pprintast.string_of_structure [{(s) with pstr_desc}]) in*)
               {(s) with pstr_desc} 
-            ) (if is_novers then (List.append first_type (List.tl td)) else td) 
+            ) (if is_novers then (List.append fst_and_snd_types (List.tl td)) else td) 
           in
           List.append novers_type (List.append pex strs)
         | _ -> assert false)  
@@ -1172,7 +1184,6 @@ let rec impl parent_mod_name sx =
           then e
           else  
             let ident_name = mod_name_by_cnt type_name (!(descr.cnt) - cnt) in
-            (*let pe = AD.pexp_ident ~loc {txt = Longident.parse (Printf.sprintf "V%d_%s.upgrade" (!(descr.cnt) - cnt) type_name); loc} in*)
             let pe = AD.pexp_ident ~loc {txt = Longident.parse (ident_name ^ ".upgrade"); loc} in
             let pfe = AD.pexp_apply ~loc pe [(Nolabel, e)] in
             expr_upgrade (cnt - 1) pfe
@@ -1212,6 +1223,10 @@ let rec impl parent_mod_name sx =
   ) [] sx |> List.rev
 
 let () =
+  Driver.add_arg "-novers-types" 
+    (Arg.String (fun s -> arg_novers_types := BatString.split_on_string ~by:s " "))
+    ~doc:"novers types";
+
   Driver.register_transformation
     ~preprocess_impl
     ~rules:[rule_vers]

@@ -1,7 +1,7 @@
 open Bin_prot.Std
 type trv_novers = {
   f1: int ;
-  f2: string }[@@deriving (bin_write, bin_read)][@@novers ]
+  f2: string }[@@deriving (bin_write, bin_read)]
 include
   struct
     let _ = fun (_ : trv_novers) -> ()
@@ -50,8 +50,7 @@ include
 module V0_trv =
   struct
     type trv = {
-      _novers_field: trv_novers }[@@deriving (bin_write, bin_read)][@@novers
-                                                                    ]
+      _novers_field: trv_novers }[@@deriving (bin_write, bin_read)]
     include
       struct
         let _ = fun (_ : trv) -> ()
@@ -95,7 +94,7 @@ module V1_trv =
   struct
     type trv = {
       f1: int ;
-      f2: string }[@@deriving (bin_write, bin_read)][@@novers ]
+      f2: string }[@@deriving (bin_write, bin_read)]
     module Prev = V0_trv
     let upgrade p =
       { f1 = ((p.Prev._novers_field).f1); f2 = ((p.Prev._novers_field).f2) }
@@ -147,7 +146,7 @@ module V2_trv =
     type trv = {
       f1: int ;
       f2: string ;
-      f3: float }[@@deriving (bin_write, bin_read)][@@novers ]
+      f3: float }[@@deriving (bin_write, bin_read)]
     module Prev = V1_trv
     let upgrade p = { f1 = (p.Prev.f1); f2 = (p.Prev.f2); f3 = 0.0 }
     include
@@ -201,7 +200,7 @@ module V3_trv =
     type trv = {
       f1: int ;
       f2: int ;
-      f3: float }[@@deriving (bin_write, bin_read)][@@novers ]
+      f3: float }[@@deriving (bin_write, bin_read)]
     module Prev = V2_trv
     let upgrade p =
       { f1 = (p.Prev.f1); f2 = (int_of_string p.Prev.f2); f3 = (p.Prev.f3) }
@@ -284,7 +283,7 @@ type fake = {
 type trv_v_novers = {
   fv1: int ;
   fv2: string ;
-  fv3: trv_novers list }[@@deriving (bin_write, bin_read)][@@novers ]
+  fv3: trv_novers list }[@@deriving (bin_write, bin_read)]
 include
   struct
     let _ = fun (_ : trv_v_novers) -> ()
@@ -338,7 +337,6 @@ module V0_trv_v =
   struct
     type trv_v = {
       _novers_field: trv_v_novers }[@@deriving (bin_write, bin_read)]
-    [@@novers ]
     include
       struct
         let _ = fun (_ : trv_v) -> ()
@@ -386,7 +384,7 @@ module V1_trv_v =
     type trv_v = {
       fv1: int ;
       fv2: string ;
-      fv3: trv list }[@@deriving (bin_write, bin_read)][@@novers ]
+      fv3: trv list }[@@deriving (bin_write, bin_read)]
     module Prev = V0_trv_v
     let upgrade p =
       {
@@ -448,7 +446,7 @@ module V2_trv_v =
     type trv_v = {
       fv1: int ;
       fv2: string list ;
-      fv3: trv list }[@@deriving (bin_write, bin_read)][@@novers ]
+      fv3: trv list }[@@deriving (bin_write, bin_read)]
     module Prev = V1_trv_v
     let upgrade p =
       { fv1 = (p.Prev.fv1); fv2 = [p.Prev.fv2]; fv3 = (p.Prev.fv3) }

@@ -51,7 +51,7 @@ let () =
     let str_exp = run (Printf.sprintf "cat test/expect/%s.ml" s) in
     if str <> str_exp
     then 
-      let diff = get_diff str str_exp in
+      let diff = get_diff str_exp str in
       Printf.printf "test \x1b[1;33m%s: \x1b[1;31mfail\n\x1b[1;34mrun: %s\x1b[0m\ndiff:\n%s\n" s dsource_cmd diff;   
       exit 1
     else  

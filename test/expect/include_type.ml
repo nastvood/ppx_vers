@@ -2,14 +2,14 @@ module Module1 =
   struct
     type t_novers = {
       f1: int ;
-      f2: string }[@@novers ]
+      f2: string }
     module V0_t = struct type t = {
-                           _novers_field: t_novers }[@@novers ] end
+                           _novers_field: t_novers } end
     module V1_t =
       struct
         type t = {
           f1: int ;
-          f2: string }[@@novers ]
+          f2: string }
         module Prev = V0_t
         let upgrade p =
           {
@@ -22,7 +22,7 @@ module Module1 =
         type t = {
           f1: int ;
           f2: string ;
-          f4: float }[@@novers ]
+          f4: float }
         module Prev = V1_t
         let upgrade p = { f1 = (p.Prev.f1); f2 = (p.Prev.f2); f4 = 0.0 }
       end
@@ -38,13 +38,13 @@ module Module2 =
   struct
     type t_novers =
       | A1 
-      | A2 of Module1.t_novers [@@novers ]
-    module V0_t = struct type t = t_novers[@@novers ] end
+      | A2 of Module1.t_novers 
+    module V0_t = struct type t = t_novers end
     module V1_t =
       struct
         type t =
           | A1 
-          | A2 of Module1.t [@@novers ]
+          | A2 of Module1.t 
         module Prev = V0_t
         let upgrade p =
           match p with

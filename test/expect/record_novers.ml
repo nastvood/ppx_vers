@@ -1,13 +1,13 @@
 type tr_novers = {
   ftr1: int ;
-  ftr2: string }[@@novers ]
+  ftr2: string }
 module V0_tr = struct type tr = {
-                        _novers_field: tr_novers }[@@novers ] end
+                        _novers_field: tr_novers } end
 module V1_tr =
   struct
     type tr = {
       ftr1: int ;
-      ftr2: string }[@@novers ]
+      ftr2: string }
     module Prev = V0_tr
     let upgrade p =
       {
@@ -21,14 +21,14 @@ type tr = V1_tr.tr = {
 let tr_from_novers (x : tr_novers) = V1_tr.upgrade { _novers_field = x }
 type trv_novers = {
   f1: int ;
-  f2: string }[@@novers ]
+  f2: string }
 module V0_trv = struct type trv = {
-                         _novers_field: trv_novers }[@@novers ] end
+                         _novers_field: trv_novers } end
 module V1_trv =
   struct
     type trv = {
       f1: int ;
-      f2: string }[@@novers ]
+      f2: string }
     module Prev = V0_trv
     let upgrade p =
       { f1 = ((p.Prev._novers_field).f1); f2 = ((p.Prev._novers_field).f2) }
@@ -38,7 +38,7 @@ module V2_trv =
     type trv = {
       f1: int ;
       f2: string ;
-      f3: float }[@@novers ]
+      f3: float }
     module Prev = V1_trv
     let upgrade p = { f1 = (p.Prev.f1); f2 = (p.Prev.f2); f3 = 0.0 }
   end
@@ -47,7 +47,7 @@ module V3_trv =
     type trv = {
       f1: int ;
       f2: int ;
-      f3: float }[@@novers ]
+      f3: float }
     module Prev = V2_trv
     let upgrade p =
       { f1 = (p.Prev.f1); f2 = (int_of_string p.Prev.f2); f3 = (p.Prev.f3) }
@@ -63,16 +63,15 @@ type fake = {
 type trv_v_novers = {
   fv1: tr_novers ;
   fv2: string ;
-  fv3: trv_novers list }[@@novers ]
-module V0_trv_v =
-  struct type trv_v = {
-           _novers_field: trv_v_novers }[@@novers ] end
+  fv3: trv_novers list }
+module V0_trv_v = struct type trv_v = {
+                           _novers_field: trv_v_novers } end
 module V1_trv_v =
   struct
     type trv_v = {
       fv1: tr ;
       fv2: string ;
-      fv3: trv list }[@@novers ]
+      fv3: trv list }
     module Prev = V0_trv_v
     let upgrade p =
       {
@@ -86,7 +85,7 @@ module V2_trv_v =
     type trv_v = {
       fv1: tr ;
       fv2: string list ;
-      fv3: trv list }[@@novers ]
+      fv3: trv list }
     module Prev = V1_trv_v
     let upgrade p =
       { fv1 = (p.Prev.fv1); fv2 = [p.Prev.fv2]; fv3 = (p.Prev.fv3) }
