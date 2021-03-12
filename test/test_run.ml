@@ -42,16 +42,25 @@ let ocamlfind_query libs =
     in
     Printf.sprintf "%s -c -impl" (String.concat " " str_libs)
 
+let trim s =
+  if BatString.trim s = ""
+  then ""
+  else List.map BatString.trim (BatString.split_on_string ~by:s "\n") |> String.concat ""
+
 let () = 
   let rex = Pcre.regexp "\\[@@@ocaml.ppx.context[\\d\\D]*}]\n" in 
+  let rex_merlin = Pcre.regexp "\\[@@merlin.hide[\\d\\D*]]" in 
+  let rex_ocaml_doc = Pcre.regexp "\\[@@ocaml.doc[ @\\w\"\\]]*" in
   List.iter (fun (s, libs) ->
     let _ = run (Printf.sprintf "dune build test/%s.cma" s) in 
     let dsource_cmd = Printf.sprintf "ocamlc -dsource %s _build/default/test/%s.pp.ml" (ocamlfind_query libs) s in
     let res = run (dsource_cmd ^ " 2>&1") in
     let str = Pcre.replace ~rex res in
+    let str = Pcre.replace ~rex:rex_merlin str in
+    let str = Pcre.replace ~rex:rex_ocaml_doc str in
     let str_exp = run (Printf.sprintf "cat test/expect/%s.ml" s) in
-    if str <> str_exp
-    then 
+    if str <> str_exp && trim str <> trim str_exp
+    then       
       let diff = get_diff str_exp str in
       Printf.printf "test \x1b[1;33m%s: \x1b[1;31mfail\n\x1b[1;34mrun: %s\x1b[0m\ndiff:\n%s\n" s dsource_cmd diff;   
       exit 1

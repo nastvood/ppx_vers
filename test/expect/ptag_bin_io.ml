@@ -56,7 +56,7 @@ include
         vtag_read = __bin_read_t1_novers__
       }
     let _ = bin_reader_t1_novers
-  end[@@ocaml.doc "@inline"][@@merlin.hide ]
+  end
 module V0_t1 =
   struct
     type t1 = t1_novers[@@deriving (bin_write, bin_read)]
@@ -81,7 +81,7 @@ module V0_t1 =
             vtag_read = __bin_read_t1__
           }
         let _ = bin_reader_t1
-      end[@@ocaml.doc "@inline"][@@merlin.hide ]
+      end
   end
 module V1_t1 =
   struct
@@ -148,7 +148,7 @@ module V1_t1 =
             vtag_read = __bin_read_t1__
           }
         let _ = bin_reader_t1
-      end[@@ocaml.doc "@inline"][@@merlin.hide ]
+      end
   end
 module V2_t1 =
   struct
@@ -233,7 +233,7 @@ module V2_t1 =
             vtag_read = __bin_read_t1__
           }
         let _ = bin_reader_t1
-      end[@@ocaml.doc "@inline"][@@merlin.hide ]
+      end
   end
 let bin_reader_t1 = V2_t1.bin_reader_t1
 let bin_read_t1 = V2_t1.bin_read_t1

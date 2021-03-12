@@ -2,7 +2,7 @@
   (names test_run)
   (modes byte native)
   (modules test_run)
-  (libraries unix pcre)
+  (libraries unix pcre batteries)
 )
 
 (library 

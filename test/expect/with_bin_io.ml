@@ -46,13 +46,14 @@ include
         vtag_read = __bin_read_trv_novers__
       }
     let _ = bin_reader_trv_novers
-  end[@@ocaml.doc "@inline"][@@merlin.hide ]
+  end
 module V0_trv =
   struct
     type trv = {
       _novers_field: trv_novers }[@@deriving (bin_write, bin_read)]
     include
       struct
+
         let _ = fun (_ : trv) -> ()
         let (bin_size_trv : trv Bin_prot.Size.sizer) =
           function
@@ -88,7 +89,7 @@ module V0_trv =
             vtag_read = __bin_read_trv__
           }
         let _ = bin_reader_trv
-      end[@@ocaml.doc "@inline"][@@merlin.hide ]
+      end
   end
 module V1_trv =
   struct
@@ -139,7 +140,7 @@ module V1_trv =
             vtag_read = __bin_read_trv__
           }
         let _ = bin_reader_trv
-      end[@@ocaml.doc "@inline"][@@merlin.hide ]
+      end
   end
 module V2_trv =
   struct
@@ -193,7 +194,7 @@ module V2_trv =
             vtag_read = __bin_read_trv__
           }
         let _ = bin_reader_trv
-      end[@@ocaml.doc "@inline"][@@merlin.hide ]
+      end
   end
 module V3_trv =
   struct
@@ -265,7 +266,7 @@ module V3_trv =
             vtag_read = __bin_read_trv__
           }
         let _ = bin_reader_trv
-      end[@@ocaml.doc "@inline"][@@merlin.hide ]
+      end
   end
 let bin_reader_trv = V3_trv.bin_reader_trv
 let bin_read_trv = V3_trv.bin_read_trv
@@ -332,7 +333,7 @@ include
         vtag_read = __bin_read_trv_v_novers__
       }
     let _ = bin_reader_trv_v_novers
-  end[@@ocaml.doc "@inline"][@@merlin.hide ]
+  end
 module V0_trv_v =
   struct
     type trv_v = {
@@ -377,7 +378,7 @@ module V0_trv_v =
             vtag_read = __bin_read_trv_v__
           }
         let _ = bin_reader_trv_v
-      end[@@ocaml.doc "@inline"][@@merlin.hide ]
+      end
   end
 module V1_trv_v =
   struct
@@ -439,7 +440,7 @@ module V1_trv_v =
             vtag_read = __bin_read_trv_v__
           }
         let _ = bin_reader_trv_v
-      end[@@ocaml.doc "@inline"][@@merlin.hide ]
+      end
   end
 module V2_trv_v =
   struct
@@ -513,7 +514,7 @@ module V2_trv_v =
             vtag_read = __bin_read_trv_v__
           }
         let _ = bin_reader_trv_v
-      end[@@ocaml.doc "@inline"][@@merlin.hide ]
+      end
   end
 let bin_reader_trv_v = V2_trv_v.bin_reader_trv_v
 let bin_read_trv_v = V2_trv_v.bin_read_trv_v
