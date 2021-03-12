@@ -42,6 +42,12 @@
 )
 
 (library 
+ (name ptag_bin_io)
+ (preprocess (pps ppx_vers ppx_bin_prot))
+ (modules ptag_bin_io)
+)
+
+(library 
  (name include_type)
  (preprocess (pps ppx_vers))
  (modules include_type)

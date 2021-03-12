@@ -6,6 +6,7 @@ let tests = [
   ("pvariant", []);
   ("include_type", []);
   ("with_bin_io", ["bin_prot"]);
+  ("ptag_bin_io", ["bin_prot"]);
 ]
 
 let run cmd = 

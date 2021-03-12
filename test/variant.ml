@@ -9,6 +9,6 @@ type%vers[@novers] tn =
 type%vers[@novers] tn1 =
   | C1
   | C2 of tn [@from_novers]
-  and tn1 = 
+    and tn1 = 
   | C1 of int [@migrate ? Prev.C1 when C1 0]
   | C2 of tn

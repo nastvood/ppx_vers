@@ -349,7 +349,7 @@ let get_upgrade_fun ~loc ~parent_mod_name ~type_name td =
   | Ptype_open -> assert false
 
 let clean_attrs td =
-  let clean attrs = remove_attrs [from_novers; vers_set; vers_novers] attrs in
+  let clean attrs = remove_attrs [from_novers; vers_set; vers_novers; vers_ptag] attrs in
   match td.ptype_kind with
   | Ptype_record ldx ->
     let ldx = List.map (fun ld -> {(ld) with pld_attributes = clean ld.pld_attributes}) ldx in
@@ -428,6 +428,11 @@ let type_kind_by_mod_expr pe =
     | _ -> assert false)
   | _ -> assert false
 
+let create_app_fun ~loc mod_name f_name =  
+  let f_name_p = AD.pvar ~loc f_name in
+  let e_r = AD.pexp_ident ~loc {txt = Longident.parse (mod_name ^ "." ^ f_name); loc} in
+  [%stri let [%p f_name_p] = [%e e_r]]
+
 let gen_app_funcs ~loc mod_name pe =
   match pe.pmod_desc with
   | Pmod_structure sx ->
@@ -443,12 +448,11 @@ let gen_app_funcs ~loc mod_name pe =
               | Pstr_value (_, vbx) ->
                 List.fold_right (fun vb isx ->
                   (match vb.pvb_pat.ppat_desc with
-                  | Ppat_var l ->
-                    let f_name = l.txt in
-                    let f_name_l = AD.pvar ~loc f_name in
-                    let e_r = AD.pexp_ident ~loc {txt = Longident.parse (mod_name ^ "." ^ f_name); loc} in
-                    [%stri let [%p f_name_l] = [%e e_r]] ::
-                    isx
+                  | Ppat_var l when not(List.mem_assoc l.txt isx) -> 
+                    (l.txt, create_app_fun ~loc mod_name l.txt) :: isx
+                  | Ppat_constraint ({ppat_desc = Ppat_var l; _}, _) when 
+                    not(BatString.starts_with l.txt "_" || List.mem_assoc l.txt isx) ->
+                    (l.txt, create_app_fun ~loc mod_name l.txt) :: isx
                   | _ -> isx)
                 ) vbx isx                      
               | _ -> isx)
@@ -459,7 +463,7 @@ let gen_app_funcs ~loc mod_name pe =
       | Pstr_value _ ->
         sx  
       | _ -> sx
-    ) sx []
+    ) sx [] |> List.map snd
   | _ -> [] 
 
 let gen_last_write_fun ~loc type_name ver =  
@@ -641,7 +645,6 @@ let patch_ptag_bin_read type_kind s =
             let pf_e1 = {(pf_e1) with pexp_desc = Pexp_match (pm_e, pm_cx)} in
             let pf_e0 = {(pf_e0) with pexp_desc = Pexp_fun (pf_l1, None, pf_p1, pf_e1)} in
             let se = {(se) with pexp_desc = Pexp_fun (Nolabel, None, pf_p0, pf_e0)} in
-            (*let () = Printf.printf "%s\n" (Pprintast.string_of_expression se) in*)
             let vb = {(vb) with pvb_expr = se} in
             {(s) with pstr_desc = Pstr_value (Nonrecursive, [vb])}
           | _ -> assert false)
@@ -663,7 +666,7 @@ let patch_ptag ~loc p type_name type_kind s isx =
   | Ppat_var l when l.txt = "bin_write_" ^ type_name && is_type_variant type_kind ->
     patch_ptag_bin_write ~loc type_kind s :: (*s ::*) isx  
   | Ppat_var l when l.txt = "bin_size_" ^ type_name && is_type_variant type_kind ->
-    patch_ptag_bin_size ~loc s :: s :: isx  
+    patch_ptag_bin_size ~loc s :: (*s ::*) isx  
   | _ -> s :: isx)  
 
 let patch_bin_io_incl ~loc incl type_name type_kind pm isx s =  
@@ -1025,7 +1028,7 @@ let gen_novers ~loc type_name rf td attrs =
           else cd
         ) cdx
       in
-      ({(td_novers) with ptype_kind = Ptype_variant cdx; ptype_attributes = remove_attrs [vers_novers] td_novers.ptype_attributes}, [])
+      ({(td_novers) with ptype_kind = Ptype_variant cdx; ptype_attributes = remove_attrs [vers_novers; vers_ptag] td_novers.ptype_attributes}, [])
     | Ptype_abstract when pvariant_by_type_declaration td_novers <> None ->  
       (match td.ptype_manifest with
       | Some ({ptyp_desc = Ptyp_variant (rfx, clf, lx_opt); _} as ct) ->
@@ -1118,7 +1121,7 @@ let rec preprocess_impl sx =
                 | Some attr -> attr :: ins_attrs
                 | None -> ins_attrs
               in
-              let t = {(t) with ptype_attributes = remove_attrs [vers_novers] ins_attrs} in
+              let t = {(t) with ptype_attributes = remove_attrs [vers_novers; vers_ptag] ins_attrs} in
               let pstr_desc = Pstr_type (rf, [t]) in
               let payload = PStr [{(sf) with pstr_desc}] in
               let pstr_desc = Pstr_extension ((e, payload), ax) in
