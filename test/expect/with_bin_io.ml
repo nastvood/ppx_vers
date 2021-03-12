@@ -53,7 +53,6 @@ module V0_trv =
       _novers_field: trv_novers }[@@deriving (bin_write, bin_read)]
     include
       struct
-
         let _ = fun (_ : trv) -> ()
         let (bin_size_trv : trv Bin_prot.Size.sizer) =
           function

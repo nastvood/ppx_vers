@@ -45,19 +45,21 @@ let ocamlfind_query libs =
 let trim s =
   if BatString.trim s = ""
   then ""
-  else List.map BatString.trim (BatString.split_on_string ~by:s "\n") |> String.concat ""
+  else List.map BatString.trim (BatString.split_on_string ~by:"\n" s) |> String.concat ""
 
 let () = 
-  let rex = Pcre.regexp "\\[@@@ocaml.ppx.context[\\d\\D]*}]\n" in 
-  let rex_merlin = Pcre.regexp "\\[@@merlin.hide[\\d\\D*]]" in 
-  let rex_ocaml_doc = Pcre.regexp "\\[@@ocaml.doc[ @\\w\"\\]]*" in
+  let rexx = 
+    [
+      Pcre.regexp "\\[@@@ocaml.ppx.context[\\d\\D]*}]\n";
+      Pcre.regexp "\\[@@merlin.hide[ @\\w\"\\]]";
+      Pcre.regexp "\\[@@ocaml.doc[ @\\w\"\\]]*"; 
+    ]
+  in
   List.iter (fun (s, libs) ->
     let _ = run (Printf.sprintf "dune build test/%s.cma" s) in 
     let dsource_cmd = Printf.sprintf "ocamlc -dsource %s _build/default/test/%s.pp.ml" (ocamlfind_query libs) s in
     let res = run (dsource_cmd ^ " 2>&1") in
-    let str = Pcre.replace ~rex res in
-    let str = Pcre.replace ~rex:rex_merlin str in
-    let str = Pcre.replace ~rex:rex_ocaml_doc str in
+    let str = List.fold_left (fun str rex -> Pcre.replace ~rex str) res rexx in
     let str_exp = run (Printf.sprintf "cat test/expect/%s.ml" s) in
     if str <> str_exp && trim str <> trim str_exp
     then       
