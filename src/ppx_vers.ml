@@ -659,14 +659,16 @@ let is_type_variant type_kind =
   | Ptype_variant _ -> true
   | _ -> false 
 
-let patch_ptag ~loc p type_name type_kind s isx =   
+let patch_ptag ~is_last ~loc p type_name type_kind s isx =   
   (match p.ppat_desc with
   | Ppat_var l when l.txt = "bin_read_" ^ type_name && is_type_variant type_kind ->
-    patch_ptag_bin_read type_kind s :: (*s ::*) isx  
+    patch_ptag_bin_read type_kind s :: isx  
   | Ppat_var l when l.txt = "bin_write_" ^ type_name && is_type_variant type_kind ->
-    patch_ptag_bin_write ~loc type_kind s :: (*s ::*) isx  
+    patch_ptag_bin_write ~loc type_kind s :: isx  
   | Ppat_var l when l.txt = "bin_size_" ^ type_name && is_type_variant type_kind ->
-    patch_ptag_bin_size ~loc s :: (*s ::*) isx  
+    if is_last
+    then patch_ptag_bin_size ~loc s :: gen_last_size_fun ~loc type_name :: isx  
+    else patch_ptag_bin_size ~loc s :: isx  
   | _ -> s :: isx)  
 
 let patch_bin_io_incl ~loc incl type_name type_kind pm isx s =  
@@ -676,7 +678,7 @@ let patch_bin_io_incl ~loc incl type_name type_kind pm isx s =
       | Pstr_value (_, vbx) when vbx <> [] ->
         let hd_vbx = List.hd vbx in
         (match hd_vbx.pvb_pat.ppat_desc with
-        | Ppat_constraint (p, _) -> patch_ptag ~loc p type_name type_kind s isx
+        | Ppat_constraint (p, _) -> patch_ptag ~is_last:false ~loc p type_name type_kind s isx
         | _ -> s :: isx)
       | _ -> s :: isx)
     ) isx []
@@ -700,7 +702,7 @@ let patch_bin_io_incl_last ~loc ver first_ver incl  ~type_name type_kind pm isx 
           s :: gen_last_size_fun ~loc type_name  :: isx              
         | Ppat_constraint (p, _) -> 
           if SD.exists_attr "ptag" "" type_name 
-          then  patch_ptag ~loc p type_name type_kind s isx
+          then patch_ptag ~is_last:true ~loc p type_name type_kind s isx
           else
             (match p.ppat_desc with
             | Ppat_var l when l.txt = "bin_size_" ^ type_name ->

@@ -172,6 +172,7 @@ module V2_t1 =
           | A4 v1 ->
               let size = 4 in Bin_prot.Common.(+) size (bin_size_float v1)
           | A2 -> 4
+        let bin_size_t1 t = (bin_size_t1 t) + 1
         let _ = bin_size_t1
         let (bin_write_t1 : t1 Bin_prot.Write.writer) =
           fun buf ->
